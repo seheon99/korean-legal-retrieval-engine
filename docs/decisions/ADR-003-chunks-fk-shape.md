@@ -1,8 +1,7 @@
 # ADR-003 — Chunks-table FK shape across multi-source retrieval
 
-- **Status**: **Proposed (revision 2)** — addresses six DA points raised on
-  the original draft. Not yet acted on.
-- **Date**: 2026-04-25 (initial draft); revised 2026-04-26
+- **Status**: **Accepted** (revision 2; accepted 2026-04-26)
+- **Date**: 2026-04-25 (initial draft); revised and accepted 2026-04-26
 - **Context layer**: Search-index layer (chunks)
 - **Triggers**: ADR-002's DA pass surfaced that the chunks FK shape was
   implicitly assumed (polymorphic `(source_type, source_id BIGINT)`) without
@@ -251,8 +250,8 @@ here, and re-examine if operational friction surfaces.
 
 - ADR-001 — annexes are a chunk source, forms are not
 - ADR-002 — `BIGINT IDENTITY` PK + natural-key UNIQUE for statute tables
-- `phase-1-progress.md` §5 — chunks metadata schema sketch (currently shows
-  a polymorphic shape; this ADR proposes superseding that sketch)
+- `phase-1-progress.md` §5 — chunks metadata schema sketch (shows a
+  polymorphic shape; **superseded** by this ADR)
 - `phase-1-progress.md` §5 — per-category source-structure design
   (`legal_documents` + `structure_nodes`, `case_laws` + `case_sections`,
   …); informs the column list for the future per-category FK columns

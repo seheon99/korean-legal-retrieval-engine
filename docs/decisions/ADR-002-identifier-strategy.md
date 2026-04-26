@@ -7,14 +7,12 @@
 - **Plan file**: `~/.claude/plans/quizzical-scribbling-scone.md`
 - **Related principles**: phase-1-progress.md §5 design principles #5 (multi-source
   by design) and #9 (idempotent indexing)
-- **Depends on**: a chunks-table FK shape decision drafted as **ADR-003 (Proposed)**.
-  ADR-002's Rationale #2 ("uniform `BIGINT` FK shape into chunks") and the
-  rejection of Option C are conditional on whichever shape ADR-003 picks.
-  All three candidates in ADR-003 (polymorphic, split FK columns, split
-  chunks tables) want a single non-composite BIGINT reference column per
-  source — so the **decision** stands across all three; the **reasoning
-  weight** shifts only between principles #5, #9, and locality depending on
-  the outcome
+- **Depends on**: **ADR-003 (Accepted)** — chunks-table FK shape is split FK
+  columns with real `REFERENCES`, one nullable `BIGINT` FK column per source
+  table. ADR-002's Rationale #2 ("uniform `BIGINT` FK shape into chunks")
+  reads against that outcome: each source table's PK becomes a dedicated
+  `BIGINT` FK column on `chunks`, so a single-column non-composite reference
+  is exactly what ADR-003 needs from this ADR
 
 ## Context
 
@@ -23,16 +21,15 @@ Five statute tables (`legal_documents`, `structure_nodes`,
 The decision is upstream of DDL writing, the ingestion script, and the
 chunks-table FK shape.
 
-A single, consistent strategy across the five **statute-scope** tables keeps
-their FK shape uniform regardless of which chunks-table FK pattern ADR-003
-ultimately picks (polymorphic `source_id`, split columns with one FK per
-source table, or split chunks tables — see ADR-003). Mixed PK shapes within
-the statute family would force a chunks reference into either a composite or
-a text-encoded column, which all three candidates would prefer to avoid.
-Whether the same uniform-`BIGINT` argument extends to future non-statute
-categories (judicial, interpretive, practical, academic) is a
-related-but-separate decision — see "Consequences" for how that is left
-open.
+A single, consistent strategy across the five **statute-scope** tables makes
+each one a clean source of a `BIGINT` FK column on `chunks` (per ADR-003).
+Mixed PK shapes within the statute family would have forced any of the FK
+patterns ADR-003 considered into a composite or text-encoded reference,
+which is undesirable under split FK columns just as under any of the
+rejected alternatives. Whether the same uniform-`BIGINT` argument extends
+to future non-statute categories (judicial, interpretive, practical,
+academic) is a related-but-separate decision — see "Consequences" for how
+that is left open.
 
 ## Decision
 
@@ -79,14 +76,14 @@ become non-unique. The version-specific natural key is `mst`.
    would require a `SELECT` before each `INSERT` to detect re-runs, which is
    both racier and more code.
 
-2. **Uniform `BIGINT` FK shape into chunks (principle #5)** — chunks reference
-   five statute tables today, plus future categories. Whatever shape ADR-003
-   picks (polymorphic `source_id`, split FK columns, or split chunks tables),
-   each of those candidates wants every source PK to be a single
-   non-composite column of the same width — composite PKs (Option C) would
-   force a composite reference column or a string-encoded fallback in any of
-   them. This rationale is therefore conditional on ADR-003's outcome but
-   resilient to which of its three options wins.
+2. **Uniform `BIGINT` FK shape into chunks (principle #5)** — chunks
+   reference five statute tables today, plus future categories. ADR-003
+   landed on split FK columns with one nullable `BIGINT` FK column per
+   source table; that shape needs every source PK to be a single
+   non-composite column of the same width. Composite PKs (Option C) would
+   force a composite reference column or a string-encoded fallback,
+   degrading the chunks-side schema regardless of which FK pattern ADR-003
+   chose.
 
 3. **B-tree FK lookup locality after vector search** — pgvector indexes the
    embedding column itself; the source identifier is a payload column riding
@@ -109,8 +106,8 @@ Mitigations:
 - The **natural key** is portable, so chunks-to-source linkage can always be
   re-derived via the UK after a rebuild.
 - Chunks get rebuilt on every embedding refresh anyway, so the chunks-side
-  FK values (under any of ADR-003's candidate shapes) are never
-  authoritative across rebuilds.
+  FK columns (`structure_node_id`, `annex_id`, …) are never authoritative
+  across rebuilds.
 
 ## What was checked vs. what is still open
 
@@ -156,13 +153,12 @@ These are tracked as verification work, not as blockers for this ADR.
   (SQL-standard, recommended Postgres ≥ 10).
 - The ingestion script can use `INSERT ... ON CONFLICT (natural_key) DO UPDATE
   ...` for every table. No separate dedup logic required.
-- For Phase 1 statute scope, every chunks-side FK into a statute table will
-  be `BIGINT` (the exact column name and shape depend on ADR-003 — single
-  polymorphic `source_id`, dedicated `structure_node_id` / `annex_id`
-  columns, or per-source chunks tables). Whether the same PK strategy
-  applies to future non-statute ERDs (judicial, interpretive, practical,
-  academic) is **open** — it is *recommended* on the same grounds, but
-  each category will be re-confirmed when its own ADR is drafted.
+- For Phase 1 statute scope, the chunks-side FK columns are
+  `structure_node_id BIGINT` and `annex_id BIGINT` (per ADR-003). Whether
+  the same PK strategy applies to future non-statute ERDs (judicial,
+  interpretive, practical, academic) is **open** — it is *recommended* on
+  the same grounds, but each category will be re-confirmed when its own
+  ADR is drafted.
 - TODO-5 (amendment retention policy) may add a *second* UNIQUE constraint to
   some tables (e.g., `(law_id, effective_at)` on `legal_documents`) but does
   not invalidate the constraints established here.
@@ -177,5 +173,5 @@ These are tracked as verification work, not as blockers for this ADR.
   `docs/api-samples/law-277417-중대재해처벌법시행령.xml` — sample XML used
   to spot-check the structural assumptions described in "What was checked
   vs. what is still open"
-- `docs/decisions/ADR-003-chunks-fk-shape.md` (Proposed) — decides the
+- `docs/decisions/ADR-003-chunks-fk-shape.md` (Accepted) — decides the
   chunks-side reference shape this ADR depends on
