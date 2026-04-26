@@ -398,19 +398,36 @@ If this table is rejected, the alternative is to store 부칙 as `structure_node
 - Whether downstream consumers (retrieval pipeline, API responses) need to access these fields
 **Related agreement**: chunks table uses JSONB `metadata` per phase-1-progress.md §5
 
-### TODO-9: Whether 부칙 belongs in a separate table
+### TODO-9: ✅ RESOLVED — keep `supplementary_provisions` as a separate table
 
-**Current state**: this ERD proposes `supplementary_provisions` as a separate table
-**Decision needed**: confirm separate table vs. merge into `structure_nodes`
-**Options to consider**:
-- A. Separate table (current proposal) — type-safe, acknowledges structural difference (free text vs. hierarchy)
-- B. Store as `structure_nodes` with `level = 0` or `level = 9` — simpler schema, one tree, but 부칙 content doesn't have children
-- C. Store as `structure_nodes` AND parse 부칙 content into child nodes — would require NLP or regex parsing of free-text 부칙 articles
-**Information required to decide**:
-- Whether 부칙 content needs to be chunked for retrieval (transitional provisions can be search-relevant)
-- If chunked, whether the chunks FK should point to `supplementary_provisions.provision_id` or `structure_nodes.node_id`
-- Whether the retrieval pipeline treats 부칙 differently from body articles
-**Related agreement**: not in earlier sketch — this is a new question raised by XML analysis
+**Decision**: Option A — `supplementary_provisions` stays as a separate
+table, not merged into `structure_nodes`. See
+`docs/decisions/ADR-004-supplementary-provisions-placement.md`.
+
+**Why** (full argument in ADR-004):
+- `<부칙단위>` carries `부칙공포일자` and `부칙공포번호` that have no
+  analog on `<조문단위>`. Merging would force them nullable on every
+  `structure_nodes` row — the same polymorphic-table pattern ADR-003
+  rejected on the chunks side.
+- Cardinality semantics differ: 조문 row count tracks current statute
+  structure; 부칙단위 row count tracks amendment history (Decree:
+  1 제정 + 5 일부개정 = 6 rows).
+- Different retrieval intents — body-content queries vs effective-date
+  queries — encode at the schema layer for free with two tables.
+
+**Schema implications applied**: none — the current ERD draft already
+reflects the separate-table shape. No column changes from this decision.
+
+**Out of scope (future ADRs)**:
+- Whether `supplementary_provisions` is a chunk source. ADR-003's DDL
+  omits `provision_id`; the current implicit default is "not a chunk
+  source," but that has not been argued explicitly. Provisional next
+  ADR.
+- How to internally parse `부칙내용` (제N조 inside the CDATA blob).
+- Whether to add a `kind` column distinguishing 제정 부칙 vs 일부개정
+  부칙 (coupled with the chunk-source question).
+
+**Related agreement**: not in earlier sketch — raised by XML analysis on 2026-04-25, resolved 2026-04-26.
 
 ### TODO-10: Act-Decree linkage mechanism
 
@@ -465,7 +482,7 @@ If this table is rejected, the alternative is to store 부칙 as `structure_node
 
 | Entity | Reason |
 |--------|--------|
-| `supplementary_provisions` | 부칙 is structurally different from the article hierarchy (free text, different keys). Not in sketch. Confirmation needed (TODO-9) |
+| `supplementary_provisions` | 부칙 is structurally different from the article hierarchy (free text, different keys). Not in sketch. Confirmed by ADR-004 (TODO-9 resolved 2026-04-26) |
 | `annexes` | 별표 contains substantive provisions (penalty schedules, scope qualifiers, etc.) and must be a first-class chunk source. Inline text confirmed in API (TODO-1 resolved) |
 | `forms` | 서식 carries metadata + downloadable files only. Body content is ASCII box-art unsuitable for retrieval. Excluded from chunks (TODO-1 resolved) |
 
