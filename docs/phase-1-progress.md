@@ -1,203 +1,205 @@
 # Korean Legal Retrieval Engine — Phase 1 Progress
 
-> **Status**: Data Source Layer 조사 단계 (Phase 0 진행 중) **Generated**: 다음 세션 recall용 합의 산출물 **Next session task**: 성문규범 ERD 작성 → Document Parsing Pipeline
+> **Status**: Data Source Layer investigation (Phase 0 in progress)
+> **Generated**: Hand-off artifact for next session recall
+> **Next session task**: Statute (성문규범) ERD → Document Parsing Pipeline
 
 ---
 
-## 신뢰도 마커 범례
+## Confidence Markers
 
-- ✅ **확정**: 실측·문서로 검증됨
-- 🔶 **합의**: 실측 전 합의된 결정
-- ⚠️ **가설**: 확증 없는 추정 (다음 세션에서 검증 필요)
-- ❓ **미해결**: 답이 필요한 결정
-
----
-
-## 1. 프로젝트 정체성
-
-**한 줄 정의** ✅
-
-> 법제처 API 데이터와 법제처 API 외부의 중대재해처벌법 관련 자료(해설서·공단 매뉴얼·학술자료)를 통합하고, 메타데이터를 풍부화하여 단일 검색 인터페이스로 제공하는 **Retrieval Engine 프로토타입**. 하이브리드 검색·Query Rewriting·Reranker 파이프라인의 효과를 정량 평가(Recall@K, MRR)로 실증.
-
-**범위 결정** ✅
-
-- ✅ Retrieval Engine만 (RAG의 R-layer). Generation은 범위 밖.
-- ✅ 도메인: 한국 법률, Phase 1은 **중대재해처벌법**으로 좁힘.
-- ✅ 목표: 엔진 성숙 + 포트폴리오 (KTB 2027 H1).
+- ✅ **Confirmed**: Verified by measurement or documentation
+- 🔶 **Agreed**: Decided by agreement before measurement
+- ⚠️ **Hypothesis**: Unverified assumption (needs verification next session)
+- ❓ **Open**: Decision required
 
 ---
 
-## 2. Legal Data 카테고리 정의
+## 1. Project Identity
 
-| name | description                                  |
-| ---- | -------------------------------------------- |
-| 성문규범 | 국가 권력이 제정·공포한 법적 구속력을 가진 규범 텍스트              |
-| 사법판단 | 법원 또는 헌법재판소가 구체 사건에 대해 내린 판단 기록              |
-| 유권해석 | 행정기관이 법령의 의미와 적용에 대해 공식적으로 제시한 해석이나 준사법적 판단  |
-| 실무자료 | 법 실무 수행을 돕기 위해 정부와 공공기관이 발행한 법적 효력이 없는 참고 자료 |
-| 학술자료 | 학자 또는 법조 실무자가 법령 또는 판례를 해석·체계화·비평한 저작물       |
+**One-line definition** 🔶
+> A **Retrieval Engine prototype** that integrates Korean statutory data with materials outside the law.go.kr API (commentaries, public agency manuals, academic papers), enriches metadata, and exposes a unified search interface. Quantitatively validates a hybrid search + Query Rewriting + Reranker pipeline (Recall@K, MRR) on Korean legal data.
 
-**카테고리에서 흡수·통합된 것** ✅
+**Scope decisions** 🔶
+- ✅ Retrieval-only (R-layer of RAG). Generation is out of scope.
+- ✅ Domain: Korean law. Phase 1 narrowed to **Serious Accidents Punishment Act (중대재해처벌법)**.
+- ✅ Goal: engine maturity + portfolio for Korean big-tech recruiting (target: H1 2027).
 
-- 입법개정자료 → 별도 카테고리에서 제외 (Phase 2+에서 검토)
-- 부속참고 → 성문규범 내부의 "별표·서식" 하위 요소로 흡수
-- 행정심판 재결 → 사법판단이 아닌 **유권해석**으로 (행정절차이므로)
-- 부처 해설서 → 유권해석 vs 실무자료 논쟁 → **실무자료**로 (포맷·용도 기준)
-- 대법원판례해설 → 학술자료 (내용 성격 기준)
+**Owner background (for recall)**
+- Freelance backend developer (Kotlin/Spring, TypeScript/NestJS, Python)
+- SeoulTech CS, SW Maestro 14th cohort
+- Concurrent projects: adoto, OpenClaw
+- Current environment: law.go.kr OC key restricted by IP whitelist (cafe Wi-Fi blocks API calls)
 
 ---
 
-## 3. Phase 1 데이터 범위
+## 2. Legal Data Categories (owner's final structure)
 
-|type|name|source|format|
-|---|---|---|---|
-|성문규범|성문규범|법제처API|XML|
-|사법판단|사법판단|법제처API|XML|
-|유권해석|유권해석|법제처API|XML|
-|학술자료|KLRI|홈페이지|PDF|
-|실무자료|해설서|각부처 홈페이지|PDF|
-|실무자료|공단매뉴얼|산하 전문기관|PDF|
-|실무자료|법령용어사전|법제처API|XML|
+| Name | Description |
+| ---- | ---- |
+| 성문규범 (Statutes) | Normative texts enacted and promulgated by state authority with legal binding force |
+| 사법판단 (Judicial Decisions) | Records of decisions by courts or the Constitutional Court on specific cases |
+| 유권해석 (Authoritative Interpretation) | Official interpretations or quasi-judicial decisions by administrative agencies |
+| 실무자료 (Practical References) | Reference materials issued by government and public agencies for practical work, without legal force |
+| 학술자료 (Academic & Commentary) | Works by scholars or legal practitioners interpreting, systematizing, or critiquing law and case law |
 
-**Phase 1 구체 범위** 🔶
+**Evolution of categorization** ✅
 
-성문규범:
+This category set was reached through several Devil's Advocation rounds:
+- Initial draft: 7 categories (statute / judicial / interpretive / academic / legislative / appendix / practical)
+- DA #1 (taxonomic consistency): classification axes were mixed, creating boundary-case overhead → reduce
+- DA #2 (raised by owner): appendices are part of the statute itself → tables and forms are absorbed into statutes
+- Final: **5 categories** + metadata for fine-grained distinctions
 
-- ✅ 중대재해처벌법 (법률, 현행)
-- ✅ 중대재해처벌법 시행령 (대통령령, 현행)
-- 🔶 형법 중 해설서에 참조된 조항 (선별, DA #5 반영)
-- 🔶 고용노동부 고시 (중대재해 관련, 있다면)
-- ✅ 시행령 별표 (성문규범 내부 요소)
-
-사법판단:
-
-- 🔶 API로 접근 가능한 판례만 (실측 후 확정)
-- ⚠️ 예상 건수: 20~30건 (DA #2에서 실측 필요로 합의)
-
-유권해석:
-
-- 🔶 국가법령정보센터 해석례 API로 접근 가능한 것
-- ⏸️ 고용노동부 질의회시 별도 수집은 Phase 2
-
-실무자료:
-
-- ✅ 고용노동부 중대재해처벌법 해설서 (2021.11, 공공누리 1유형)
-- ✅ 고용노동부 중대재해처벌법령 FAQ
-- 🔶 한국산업안전보건공단 안전보건관리체계 가이드북 (라이선스 재확인)
-
-학술자료:
-
-- 🔶 KLRI 자료 (공공누리 4유형 — 변경금지 제약)
-- 🔶 Seheon이 직접 제공하는 PDF 1~3개 (텍스트로 변환 후)
-
-**제외 (Phase 2+로 미룸)**:
-
-- 산업안전보건법 (관련성 높지만 범위 확장)
-- 행정규칙·재결례 (Phase 3+)
-- 입법개정자료 (제안이유서·회의록·심사보고서 모두)
-- 검찰 수사 지침 (접근성 불확실)
-- 환경부·국토부 해설서 (Phase 2)
-- 로펌 뉴스레터 (저작권)
-- 언론 법률 기사 (저작권)
+**What was absorbed or merged** ✅
+- Legislative materials → removed from top-level; deferred to Phase 2+
+- Appendix/reference category → dissolved; appendices become a sub-element of statutes
+- Administrative-appeal rulings → moved from judicial to **interpretive** (administrative procedure, not judicial)
+- Ministry commentaries → debated between interpretive and practical → classified as **practical** (form and purpose, not authority)
+- Supreme Court case commentaries → academic (content nature outweighs publisher)
 
 ---
 
-## 4. 라이선스 매트릭스
+## 3. Phase 1 Data Sources (owner's table)
 
-|자료|라이선스|본문 인덱싱|메타만|상업화|
-|---|---|---|---|---|
-|법제처 API 데이터 (법령·판례·해석례)|공공 (자유 이용 추정) ⚠️|✅|-|🔶|
-|고용노동부 중대재해처벌법 해설서|공공누리 1유형 ✅|✅|-|✅|
-|고용노동부 FAQ|공공누리 추정 1유형 🔶|✅|-|✅|
-|한국산업안전보건공단 가이드북|미확인 ❓|🔶|-|❓|
-|KLRI 연구보고서·학술지|공공누리 4유형 ✅|⚠️|✅|❌|
-|환경부·국토부 해설서|미확인 ❓|❓|❓|❓|
-|산재예방표준용어 CSV|공공데이터 (공단)|❌ (도메인 부적합)|-|-|
-|학술 논문 (RISS·KCI)|저자 저작권|❌|🔶 (서지·초록만)|❌|
-|로펌 뉴스레터|로펌 저작권|❌|🔶 (메타만)|❌|
-|언론 기사|언론 저작권|❌|❌|❌|
+| Type | Name | Source | Format |
+| ---- | ---- | ---- | ---- |
+| Statute | 성문규범 | law.go.kr API | XML |
+| Judicial | 사법판단 | law.go.kr API | XML |
+| Interpretive | 유권해석 | law.go.kr API | XML |
+| Academic | KLRI publications | KLRI website | PDF |
+| Practical | Ministry commentaries | Each ministry's website | PDF |
+| Practical | Public agency manuals | Affiliated specialized agencies | PDF |
+| Practical | Legal terminology | law.go.kr API | XML |
 
-**중요 합의 — 공공누리 4유형의 RAG 처리** 🔶
+**Concrete Phase 1 scope** 🔶
 
-"검색 엔진의 청킹·임베딩이 데이터 가공인가" 문제:
+Statute:
+- ✅ Serious Accidents Punishment Act (current)
+- ✅ Enforcement Decree of the Act (current)
+- 🔶 Selected Criminal Code articles referenced by the official commentary (DA #5)
+- 🔶 Ministry of Employment notices on serious accidents (if applicable)
+- ✅ Enforcement Decree appendices (sub-element of statutes)
 
-- ✅ Retrieval-only는 4유형과 양립 가능 (회색지대지만 인용 범주)
-- ❌ RAG의 Generation 단계는 4유형과 충돌 (LLM이 2차 저작물 생성)
-- 🔶 KLRI 자료는 Phase 1에서 본문 인덱싱 가능하되, Phase 4+ Generation 추가 시 제외 필요
-- ✅ 라이선스를 청크 메타로 관리: `license_type`, `allowed_uses` 필드
+Judicial:
+- 🔶 Only what the API returns (number to be measured)
+- ⚠️ Estimated 20–30 cases (DA #2 requires actual measurement)
 
-**산재예방표준용어 CSV 검증 결과** ✅
+Interpretive:
+- 🔶 Whatever the law.go.kr interpretation API returns
+- ⏸️ Ministry of Employment Q&A as separate source: deferred to Phase 2
 
-- 19,466개 행이지만 IT 시스템 DB 컬럼 사전 (정의·설명 없음)
-- "용어 + 정의" 쌍이 아니라 "컬럼명 + 데이터타입"
-- Phase 1 Retrieval에 부적합
-- 교훈: 공공데이터포털 자료는 파일명만으로 판단 금지, 샘플 확인 필수
+Practical:
+- ✅ Ministry of Employment "Serious Accidents Punishment Act Commentary" (Nov 2021, KOGL Type 1)
+- ✅ Ministry of Employment FAQ on the Act
+- 🔶 KOSHA "Safety and Health Management System Guide" (license needs re-verification)
+
+Academic:
+- 🔶 KLRI materials (KOGL Type 4 — no-derivative restriction)
+- 🔶 1–3 PDFs supplied manually by owner (converted to text first)
+
+**Excluded (deferred to Phase 2+)**:
+- Occupational Safety and Health Act (high relevance but expands scope)
+- Administrative regulations and rulings (Phase 3+)
+- Legislative materials (proposal rationale, minutes, review reports — all deferred)
+- Prosecution investigation guidelines (access uncertain)
+- Ministry of Environment / Land commentaries (Phase 2)
+- Law firm newsletters (copyright)
+- Press articles on legal topics (copyright)
 
 ---
 
-## 5. 합의된 설계 결정
+## 4. License Matrix
 
-### 기술 스택 🔶
+| Material | License | Body indexing | Metadata only | Commercial use |
+| ---- | ---- | ---- | ---- | ---- |
+| law.go.kr API data (statutes, cases, interpretations) | Public (assumed open) ⚠️ | ✅ | – | 🔶 |
+| MoEL Serious Accidents Commentary | KOGL Type 1 ✅ | ✅ | – | ✅ |
+| MoEL FAQ | Presumed KOGL Type 1 🔶 | ✅ | – | ✅ |
+| KOSHA Safety Management Guide | Unknown ❓ | 🔶 | – | ❓ |
+| KLRI research reports and journals | KOGL Type 4 ✅ | ⚠️ | ✅ | ❌ |
+| MoE / MoLIT commentaries | Unknown ❓ | ❓ | ❓ | ❓ |
+| KOSHA standard terminology CSV | Public data | ❌ (domain mismatch) | – | – |
+| Academic papers (RISS, KCI) | Author copyright | ❌ | 🔶 (citation metadata only) | ❌ |
+| Law firm newsletters | Firm copyright | ❌ | 🔶 (metadata only) | ❌ |
+| Press articles | Press copyright | ❌ | ❌ | ❌ |
 
-1. **언어**: Python + FastAPI + Pydantic
-2. **DB**: PostgreSQL + pgvector (Phase 1 규모에 적합, 5M 벡터 미만)
-3. **BM25**: bm25s 라이브러리
-4. **임베딩**: KURE 또는 bge-m3 (한국어 검색 특화)
+**Critical agreement — KOGL Type 4 in RAG context** 🔶
+
+On the question "does a search engine's chunking and embedding count as data modification":
+- ✅ Retrieval-only systems are compatible with Type 4 (gray area, but within citation scope)
+- ❌ The Generation stage of RAG conflicts with Type 4 (LLM creates derivative work)
+- 🔶 KLRI materials may be body-indexed in Phase 1; must be excluded if Generation is added in Phase 4+
+- ✅ License managed as chunk metadata: `license_type`, `allowed_uses` fields
+
+**KOSHA terminology CSV verification result** ✅
+- 19,466 rows, but it is a database column dictionary for the agency's IT systems — no definitions or descriptions
+- "Term + datatype" pairs, not "term + definition" pairs
+- Unsuitable for Phase 1 retrieval
+- Lesson: do not judge data.go.kr datasets by filename; sample inspection is required
+
+---
+
+## 5. Agreed Design Decisions
+
+### Tech stack 🔶
+
+1. **Language**: Python + FastAPI + Pydantic
+2. **Database**: PostgreSQL + pgvector (fits Phase 1 scale, < 5M vectors)
+3. **BM25**: bm25s library
+4. **Embedding**: KURE or bge-m3 (Korean retrieval-tuned)
 5. **Reranker**: bge-reranker-v2-m3 (Phase 3+)
-6. **선택**: LangChain·LlamaIndex 사용 안 함 — 직접 구현 (학습·포트폴리오 가치)
+6. **Choice**: no LangChain or LlamaIndex — direct implementation (learning and portfolio value)
 
-### 검색 파이프라인 (Layer 5, Phase 2~4) 🔶
+### Retrieval pipeline (Layer 5, Phase 2–4) 🔶
 
 ```
-사용자 쿼리
+User query
     ↓
-Query Rewriting (LLM, 원본 + 확장 N개)
+Query Rewriting (LLM produces original + N expansions)
     ↓
-[원본 + 확장]을 각각 BM25 + Vector 검색
+[original + expansions] each searched via BM25 + Vector
     ↓
-RRF Fusion (원본 쿼리에 2x 가중치 — QMD식)
+RRF Fusion (original query weighted 2x — QMD pattern)
     ↓
 Reranker (cross-encoder)
     ↓
 Top-K
 ```
 
-**중요 교정 사항** ✅
+**Critical correction** ✅
+- QMD's RRF gives **2x weight to the first/original query**, not to a specific subquery type (such as hyde)
+- Owner caught this with the actual README diagram and CHANGELOG
+- Citing CHANGELOG: "the user's actual words are a more reliable signal"
 
-- QMD의 RRF는 **원본 쿼리(첫 번째)에 2x 가중치**, hyde 등 특정 타입에 가중치 아님
-- Seheon이 README 도식 + CHANGELOG로 검증해서 Claude 오해 교정함
-- 인용: "the user's actual words are a more reliable signal"
+### Per-category source-structure design 🔶
 
-### 카테고리별 Source Structure 설계 🔶
-
-이 합의가 Phase 1 ERD의 토대:
+This agreement is the foundation for the Phase 1 ERD work:
 
 ```
-법령 ERD:
-  legal_documents + structure_nodes (조·항·호 트리)
+Statute ERD:
+  legal_documents + structure_nodes (article/paragraph/item tree)
 
-판례 ERD:
-  case_laws + case_sections (사건번호·판시사항·이유)
+Judicial ERD:
+  case_laws + case_sections (case number, holdings, reasoning)
 
-유권해석 ERD:
-  interpretations + interpretation_sections (질의·회신·이유)
+Interpretive ERD:
+  interpretations + interpretation_sections (inquiry, response, reasoning)
 
-실무·학술 ERD:
-  commentaries + commentary_sections (단순 메타 + 장·절)
+Practical / Academic ERD:
+  commentaries + commentary_sections (light metadata + chapter/section)
 ```
 
-**자료 유형별 ERD 분리 + 검색 인덱스 통합** 🔶
+**Per-category ERDs are separate; the search index is unified** 🔶
+- Each category has its own ERD that preserves its native structure (owner's intuition was correct)
+- The search-side `chunks` table sits in a separate layer where all sources land in a uniform shape
+- The two layers are connected by foreign keys
+- "Originals stay separate; only the search layer is unified" — resolved earlier confusion
 
-- 자료별 ERD는 각자의 고유 구조 보존 (Seheon 직관 맞음)
-- 검색용 `chunks` 테이블은 모든 자료가 통일된 형식으로 들어가는 별도 레이어
-- 두 레이어는 외래키로 연결
-- "원본은 따로, 검색만 통일" — 이전 혼선 해결
+### 13 design principles 🔶
 
-### 13개 설계 원칙 🔶
-
-이전 대화에서 합의된 원칙들:
-
-1. Interface-First (Protocol 사용)
+Principles agreed across earlier sessions:
+1. Interface-First (use Protocol)
 2. Pluggable Components
 3. Everything Measurable (explain mode, score traces)
 4. Temporal-Ready but Not Temporal-Active
@@ -207,327 +209,345 @@ Top-K
 8. Indexing ⊥ Retrieval
 9. Idempotent Indexing
 10. Explicit Over Implicit
-11. **Query Understanding is First-Class** (Phase 2로 앞당김)
+11. **Query Understanding is First-Class** (moved up to Phase 2)
 12. **Authority-Aware Retrieval** (authority_level + judgment_status)
-13. **Measure First Plan Second** (실측 전 가정 금지)
+13. **Measure First, Plan Second** (no assumptions before measurement)
 
-### 청크 메타데이터 스키마 (구상) 🔶
+### Chunk metadata schema (draft) 🔶
 
 ```
 chunks (
   chunk_id,
   source_type,                  -- statute | judicial | interpretive | practical | academic
   source_doc_id,
-  source_node_id,               -- 자료별 ERD 외래키
+  source_node_id,               -- foreign key into the category-specific ERD
   text,
   context_prefix,
   embedding VECTOR(1024),
-  
-  -- 권위·시점
+
+  -- authority and time
   authority_level,
   published_at,
   effective_at,
   superseded_at,
-  
-  -- 자료 유형별
-  court_level,                  -- judicial일 때
-  judgment_status,              -- judicial일 때 (다툼/확립/위헌제청)
-  interpretation_type,          -- interpretive일 때
-  
-  -- 라이선스
-  license_type,                 -- public | kogl_type1 | kogl_type4 | etc
+
+  -- category-specific
+  court_level,                  -- when judicial
+  judgment_status,              -- when judicial (disputed / established / referred-to-CC)
+  interpretation_type,          -- when interpretive
+
+  -- license
+  license_type,                 -- public | kogl_type1 | kogl_type4 | etc.
   allowed_uses,                 -- ['retrieval', 'generation_context', 'redistribution']
-  
-  -- 출처
-  producer,                     -- 고용노동부, 대법원, 공단 등
+
+  -- provenance
+  producer,                     -- Ministry of Employment, Supreme Court, KOSHA, etc.
   metadata JSONB
 )
 ```
 
-### Phase 로드맵 🔶
+### Phase roadmap 🔶
 
-- **Phase 1 (Walking Skeleton)**: 단일 법령 + 시행령 + 해설서, BM25만, Query Rewriting 없음
-- **Phase 2**: Query Rewriting 추가, Vector + RRF
-- **Phase 3**: Reranker 추가, 평가 셋 정량화
-- **Phase 4**: 그래프 (cross-reference), 시점성 활성화
+- **Phase 1 (Walking Skeleton)**: single law + enforcement decree + commentary, BM25 only, no Query Rewriting
+- **Phase 2**: add Query Rewriting, Vector + RRF
+- **Phase 3**: add Reranker, formalize evaluation set
+- **Phase 4**: add cross-reference graph, activate temporality
 
 ---
 
-## 6. 미해결 결정 ❓
+## 6. Open Decisions ❓
 
-다음 세션에서 답해야 할 것:
+To be resolved in the next session:
 
-❓ **D-1**: 성문규범 ERD 범위
+❓ **D-1**: Statute ERD scope
+- A) Minimum: law + enforcement decree + enforcement rules
+- B) Medium: A + appendices and forms
+- C) Wide: B + administrative regulations (notices, directives)
+- D) Full: C + local ordinances and rules
+- (next session starting point)
 
-- A) 최소: 법률 + 시행령 + 시행규칙
-- B) 중간: A + 별표·서식
-- C) 넓음: B + 행정규칙 (고시·훈령)
-- D) 전체: C + 자치법규
-- (다음 세션 시작점)
+❓ **D-2**: License of public-agency manuals (KOSHA guides) — which KOGL type?
 
-❓ **D-2**: 산하기관 매뉴얼 (공단 가이드북) 라이선스 — 공공누리 어느 유형?
+❓ **D-3**: License of MoE / MoLIT commentaries — which KOGL type?
 
-❓ **D-3**: 환경부·국토부 해설서 라이선스 — 공공누리 어느 유형?
+❓ **D-4**: Whether law.go.kr OpenAPI actually exposes terminology-mapping endpoints, or whether the MCP server built that data separately — needs measurement
 
-❓ **D-4**: 법제처 OpenAPI에 용어 매핑 엔드포인트가 실제로 있는지 — MCP가 별도 구축한 것인지 실측 필요
+❓ **D-5**: When does Document Parsing Pipeline work begin — right after the statute ERD, or after ERDs for the other categories are also done?
 
-❓ **D-5**: Document Parsing Pipeline 시작 시점 — ERD 완성 직후? 아니면 ERD + 다른 카테고리 ERD까지 먼저?
+❓ **D-6**: Whether KLRI materials are included in Phase 1 body indexing (acceptance of the Type 4 gray area)
 
-❓ **D-6**: KLRI 자료를 Phase 1 본문 인덱싱에 포함할지 (4유형 회색지대 수용 여부)
-
-❓ **D-7**: 학술자료 — Seheon 수동 제공 PDF의 텍스트 변환은 누가? (이전 합의: Seheon이 변환 후 제공)
+❓ **D-7**: Academic materials — who handles text conversion for owner-supplied PDFs? (Earlier agreement: owner converts before supplying)
 
 ---
 
 ## 7. Phase 0 To-Do List
 
-이전 세션에서 합의된 작업 목록 (✅ 완료, 🔶 진행 중, ⏸️ 대기):
+Tasks agreed in earlier sessions (✅ done, 🔶 in progress, ⏸️ pending):
 
-### IP 제한 풀린 후 즉시 실행
+### To run as soon as IP restriction is lifted
 
-⏸️ **T1**: 국가법령정보센터 OpenAPI 회원가입 + 인증키 발급 (Seheon 보유)
+⏸️ **T1**: law.go.kr OpenAPI registration and OC key issuance (owner already holds the key)
 
-⏸️ **T2**: API 엔드포인트 카탈로그 정리
-
-- `target=law/prec/expc/admrul/ordin` 등 17개 도메인
-- 각 응답 포맷·파라미터 문서화
+⏸️ **T2**: API endpoint catalog
+- 17 domains via `target=law/prec/expc/admrul/ordin` etc.
+- Document each response format and parameter set
 - → `docs/data-sources/law-go-kr-api-catalog.md`
 
-⏸️ **T3-A**: 중대재해처벌법 본문 가져오기 (curl/Python requests)
-
-- 시행령·시행규칙 동반 확인
+⏸️ **T3-A**: Fetch the Serious Accidents Punishment Act body via curl/Python requests
+- Confirm enforcement decree and rules are reachable too
 - → `data/raw/중대재해처벌법/`
 
-⏸️ **T4-A**: 응답 구조 분석
-
-- 조·항·호 XML 구조
-- 위임조문 메타데이터 분리 여부
-- 시행일·개정이력 필드
+⏸️ **T4-A**: Analyze response structure
+- Article/paragraph/item XML hierarchy
+- Whether delegation references are exposed as metadata or only in body text
+- Effective-date and amendment-history fields
 - → `docs/data-sources/중대재해처벌법-schema.md`
 
-⏸️ **T5-A**: 시행령·시행규칙 연결 메타 확인
+⏸️ **T5-A**: Verify enforcement-decree and rules linkage metadata
 
-⏸️ **T6-B**: 중대재해처벌법 판례 API 실측 (강화)
-
-- 대법원·고등·지방별 건수
-- 전문 조회 가능 건수
+⏸️ **T6-B**: Measure case-law API coverage (strengthened)
+- Counts by court level (Supreme / High / District)
+- Counts where full text is retrievable
 - → `docs/data-sources/판례-접근성-실측.md`
 
-⏸️ **T7-A 확장**: 참고자료 인벤토리
+⏸️ **T7-A (extended)**: Reference-material inventory
+- MoEL public materials
+- KOSHA archive
+- MoE and MoLIT publications
+- Record URL + license notice for each
 
-- 고용노동부 공개자료실
-- 한국산업안전보건공단 자료실
-- 환경부·국토부
-- 각 자료의 URL + 라이선스 표시 기록
+⏸️ **T8**: Confirm whether administrative-regulation and interpretation APIs exist (record as Phase 2+ candidates)
 
-⏸️ **T8**: 행정규칙·유권해석 API 존재 확인 (Phase 2+ 후보 기록)
-
-⏸️ **T9**: 라이선스 약관 체크
-
-- 법제처 API 이용약관
-- 데이터 재배포·상업 이용·저작권 표시 의무
+⏸️ **T9**: Terms-of-use review
+- law.go.kr API ToS
+- Redistribution, commercial use, attribution obligations
 - → `docs/data-sources/license-compliance.md`
 
-⏸️ **T10-A**: Phase 1 데이터 범위 문서화
-
+⏸️ **T10-A**: Document Phase 1 data scope
 - → `docs/phase-1-scope.md`
 
-⏸️ **T11-A**: Phase 1 raw 데이터 덤프
+⏸️ **T11-A**: Phase 1 raw-data dump
 
-⏸️ **T15**: 형법 참조 조항 인벤토리
-
-- 고용노동부 해설서에서 인용된 형법 조항 추출
-- 30~50개 조항 목록화
+⏸️ **T15**: Inventory Criminal Code articles cited by the commentary
+- Extract referenced articles from MoEL commentary
+- Enumerate ~30–50 articles
 - → `docs/data-sources/referenced-criminal-law-articles.md`
 
-⏸️ **T16**: 라이선스별 자료 분류표 작성
+⏸️ **T16**: Build a license-typed material classification table
 
-⏸️ **T17**: 저작권 엄격 자료의 메타 수집 방식 결정
+⏸️ **T17**: Decide metadata-collection strategy for copyright-strict materials
 
-⏸️ **T18**: 법제처 용어 API 실측
+⏸️ **T18**: Measure law.go.kr terminology API
+- Actually call `get_legal_term_kb`, `get_daily_to_legal`, `get_legal_to_daily`
+- Confirm whether the data origin is the law.go.kr OpenAPI
 
-- `get_legal_term_kb`, `get_daily_to_legal`, `get_legal_to_daily` 실제 호출
-- 데이터 출처가 법제처 OpenAPI인지 확정
+⏸️ **T19**: Investigate KOSHA safety-and-health terminology resources (the standard-terminology CSV is already disqualified)
 
-⏸️ **T19**: 공단 안전보건 용어집 조사 (산재예방표준용어 CSV는 부적합으로 확정됨)
+### Optional
 
-### 선택 작업
-
-⏸️ **T12**: 국가법령정보센터 자연어 검색 직접 체험 ⏸️ **T13**: LBox Open 데이터 포맷 훑어보기 ⏸️ **T14**: 국회 의안정보시스템 제안이유서 접근 확인 (Phase 2+)
-
----
-
-## 8. Devil's Advocation 기록
-
-이 프로젝트의 **자기 검증 라운드**들. 각각이 설계 결정에 영향.
-
-### DA #1 — 7개 분류가 맞는가?
-
-**공격**: 분류축이 일관 안 됨, 카테고리 판단 비용 높음 **결과**: ✅ 7개 → 5개로 축소 (Seheon 최종 정리에 반영)
-
-### DA #2 — 부속참고는 성문규범의 일부 아닌가?
-
-**공격** (Seheon 제기): 별표는 법령 본문과 함께 공포됨, 같은 효력 **결과**: ✅ 부속참고 카테고리 해체. 별표는 성문규범 하위 요소로
-
-### DA #3 — 사법판단 단일 카테고리가 너무 이질적
-
-**공격**: 대법원·고등·지법·헌재의 권위가 너무 다름 **결과**: 🔶 카테고리 분할이 아니라 메타데이터 (court_level, judgment_status)로 해결
-
-### DA #4 — 한국 법체계 특화 = 확장성 약함
-
-**공격**: 다국가 확장 어려움 **결과**: ✅ 인정하되 현재 대응 불필요. "한국 특화"로 명시적 포지셔닝
-
-### DA #5 — 검색 관점에서 7개가 의미 있는가?
-
-**공격**: 카테고리는 적게, 메타데이터로 세분화가 더 실용적 **결과**: ✅ 5개 카테고리 + 풍부한 메타데이터로 합의
-
-### DA #6 — 모든 자료를 분류에 가두는 전제 위험
-
-**공격**: 경계 자료가 항상 발생, 완벽 분류 불가능 **결과**: ✅ 100% 커버리지 목표 포기. 진화하는 분류로 인정
-
-### DA #7 — 16개 조문이 통계적 해상도 부족
-
-**공격**: ablation study 불가능 **결과**: ✅ Phase 1은 Walking Skeleton 목적, ablation은 Phase 2+로
-
-### DA #8 — 판례 35건 가정이 미검증
-
-**공격**: API 접근성 실측 안 됨 **결과**: ✅ T6-B로 실측 작업 강화
-
-### DA #9 — 법 자체가 불안정 (위헌제청 + 판례 미확립)
-
-**공격**: 검색 결과가 오정보가 될 수 있음 **결과**: ✅ judgment_status 메타로 다툼/확립/위헌제청 표시
-
-### DA #10 — 해설서 품질·시점 기복
-
-**공격**: 해설서가 판례 변화 미반영 **결과**: ✅ authority_level + published_at 메타로 권위·시점 표시
-
-### DA #11 — 형법 본문 인덱싱 누락
-
-**공격**: 중대재해처벌법은 형법 특별법, 형법 본문 없으면 실무 가치 절반 **결과**: ✅ 해설서가 인용한 형법 조항만 선별 인덱싱
-
-### DA #12 (Seheon 제기) — 자연어 쿼리 자기모순
-
-**공격**: MCP에 자연어 라우팅이 있는데 "자연어 약함"이라고 한 건 모순 **결과**: ✅ Claude 자기모순 인정. 벡터 검색의 가치를 "조건부"로 재평가
-
-### DA #13 (Seheon 제기) — RRF가 정말 필요한가
-
-**공격**: 법제처가 이미 자기 데이터 잘 안다고 가정하면 RRF 효과 미증명 **결과**: ✅ 가설로 격하. Phase 1에 비교 측정(법제처 vs Seheon 엔진) 명시 추가
+⏸️ **T12**: Hands-on test of natural-language search on law.go.kr (record limitations)
+⏸️ **T13**: Skim the LBox Open dataset format
+⏸️ **T14**: Confirm access to legislative-proposal rationales via the National Assembly bill information system (Phase 2+)
 
 ---
 
-## 9. Claude의 미끄러짐 기록 (다음 세션 경고)
+## 8. Devil's Advocation Log
 
-**다음 세션의 Claude에게**: 이 프로젝트에서 반복적으로 발생한 실수 패턴. 같은 패턴 재발생 시 Seheon이 즉시 멈춰세울 것.
+Self-verification rounds for this project. Each affected design decisions.
 
-### 미끄러짐 #1: 용어 임의 생성
+### DA #1 — Are 7 categories correct?
 
-**사건**: "3-Layer Storage Pattern"이라는 표현을 업계 표준처럼 제시 **진실**: 업계 표준 용어 아님. RAGFlow의 "Load vs Indexing"이 가장 가까운 정식 명칭 **Seheon 교정**: 검증 요청으로 발견 **경계**: 새 용어 사용 시 반드시 출처 확인. 임의 명명 금지.
+**Attack**: Classification axes were inconsistent, raising boundary-case cost.
+**Result**: ✅ Reduced 7 to 5 (reflected in owner's final structure).
 
-### 미끄러짐 #2: 문서 조각 과잉 해석
+### DA #2 — Aren't appendices part of statutes?
 
-**사건**: QMD의 "first query gets 2x weight"를 "hyde에 2x"라고 단정 **진실**: README 도식과 CHANGELOG 인용 모두 "원본 쿼리에 2x" **Seheon 교정**: 실제 README 도식 첨부로 발견 **경계**: 문서 조각 해석 시 합성 추론 금지. 원문 확인 우선.
+**Attack** (raised by owner): Appendices are promulgated alongside the law and carry the same legal force.
+**Result**: ✅ Dissolved the appendix category. Appendices become a sub-element of statutes.
 
-### 미끄러짐 #3: 양방향 매핑 단정
+### DA #3 — "Judicial decisions" as a single category is too heterogeneous
 
-**사건**: MCP가 일상어↔법률용어 매핑 도구 제공 → "법제처가 공식 제공"으로 확장 **진실**: MCP 도구 존재만 확증, 데이터 출처 불명 (법제처 API 직접인지 별도 구축인지) **Seheon 교정**: "정말 그래?" 의심 질문으로 발견 **경계**: 도구·기능 존재를 데이터 출처로 자동 확장 금지.
+**Attack**: Authority levels of Supreme Court / High / District / Constitutional differ greatly.
+**Result**: 🔶 Solved not by splitting categories but by metadata (court_level, judgment_status).
 
-### 미끄러짐 #4: 레이어 침범
+### DA #4 — Korea-specific design = limited extensibility
 
-**사건**: Data Source Layer 단계에서 ERD·청크 테이블·검색 인덱스 설계로 미끄러짐 **Seheon 교정**: "야! 이러니까 헷갈리지!!! 내가 Data Source Layer부터 하자고 했잖아!!!" **경계**: Seheon이 명시한 레이어 밖으로 이동 금지. 다른 레이어를 **고려**하는 것과 **집중**하는 것을 구분.
+**Attack**: Hard to extend to other jurisdictions.
+**Result**: ✅ Acknowledged but no current action. Explicitly position the project as Korea-specific.
 
-### 미끄러짐 #5: 가정을 사실처럼
+### DA #5 — From a search standpoint, do 7 categories matter?
 
-**사건**: "판례 35건 확보 가능" 같은 미검증 숫자를 가정으로 사용 **Seheon 교정**: DA #8에서 실측 요구 **경계**: "예상", "추정" 표시 없이 숫자 제시 금지.
+**Attack**: Fewer categories with richer metadata is more practical.
+**Result**: ✅ Settled on 5 categories + rich metadata.
 
-### 미끄러짐 #6: MCP 능력 과소평가
+### DA #6 — The premise of forcing all materials into the taxonomy is risky
 
-**사건**: "MCP는 자연어 쿼리에 약함"이라고 단언 **진실**: MCP는 LLM 라우팅으로 자연어 처리. Vector 검색이 없을 뿐. **Seheon 교정**: "자연어 자동 라우팅이 있는데 자연어 못한다고?" 모순 지적 **경계**: 경쟁 제품 능력 평가 시 동시에 가진 다른 능력도 함께 고려.
+**Attack**: Boundary materials always exist; perfect classification is impossible.
+**Result**: ✅ Abandoned the 100% coverage goal. Treat the taxonomy as evolving.
 
-### 공통 패턴
+### DA #7 — 16 articles is too few for statistical resolution
 
-이 6개 미끄러짐의 공통 구조:
+**Attack**: An ablation study would not be possible.
+**Result**: ✅ Phase 1's purpose is a Walking Skeleton; ablation study is for Phase 2+.
 
-1. 일부 정보(증거 조각)를 받는다
-2. **확장 추론**으로 의미를 부풀린다
-3. **확정처럼** 제시한다
-4. Seheon이 검증 요청 또는 모순 지적
-5. Claude가 정정
+### DA #8 — The "35 cases" assumption is unverified
 
-**예방 행동**:
+**Attack**: API accessibility was never measured.
+**Result**: ✅ Strengthened T6-B as an explicit measurement task.
 
-- 새 정보 제시 전: "이건 확정인가, 추론인가?" 자문
-- 수치·표준·공식 사실 인용 시: 출처 명시
-- 경쟁 제품 평가 시: 양면 (장점·약점) 동시 검토
-- Seheon이 명시한 범위 밖으로 갈 때: 명시적 허락 받기
+### DA #9 — The law itself is unstable (referral to Constitutional Court + unsettled case law)
 
----
+**Attack**: Search results can become misinformation.
+**Result**: ✅ Use a `judgment_status` metadata field to mark disputed / established / referred-to-CC.
 
-## 10. 다음 세션 시작 가이드
+### DA #10 — Commentary quality and timeliness vary
 
-**즉시 할 것**:
+**Attack**: Commentaries lag behind case-law changes.
+**Result**: ✅ Use `authority_level` and `published_at` metadata to expose authority and recency.
 
-1. 이 문서를 다음 세션 시작 시 첨부
-2. Seheon이 정리한 **5개 카테고리 + 7개 데이터 소스 표** 재확인
-3. **D-1** (성문규범 ERD 범위) 결정부터
-4. 합의된 카테고리별 Source Structure 설계 (5번 섹션)에서 **법령 ERD** 부분을 출발점으로
+### DA #11 — The Criminal Code body is missing
 
-**ERD 작성 시 고려할 다른 레이어 사항** (이전 합의):
+**Attack**: The Serious Accidents Punishment Act is a Criminal Code special law; without Criminal Code text the practical value is halved.
+**Result**: ✅ Selectively index only Criminal Code articles cited by the official commentary.
 
-- **Document Parsing Pipeline 관점**:
-    
-    - 법제처 API XML 응답 → ERD 매핑 가능성
-    - 위임조문 ("대통령령으로 정하는") 처리
-    - 형법 참조 조항 처리
-    - 시행령 별표 (HWP/HWPX)
-- **Indexing Layer 관점**:
-    
-    - chunks 테이블이 역참조할 안정적 node_id
-    - 법령 개정 시 node_id 유지 또는 버전 관리
-- **Retrieval Pipeline 관점**:
-    
-    - 조문 + 별표 + 위임 시행령 조문을 함께 반환할 수 있는 관계 구조
-- **시점성 관점**:
-    
-    - Phase 1은 현행만, 스키마는 이력 수용 가능하게
-    - effective_at, superseded_at 필드 미리 준비
+### DA #12 (raised by owner) — Self-contradiction on natural-language queries
 
-**ERD 작업 후 자연스럽게 이어질 것**:
+**Attack**: The MCP has natural-language routing, so saying "weak at natural language" is a contradiction.
+**Result**: ✅ Claude admitted the contradiction. The value of vector search was reframed as conditional, not absolute.
 
-- Document Parsing Pipeline 설계
-- 다른 카테고리 ERD (사법판단·유권해석 등)
-- 라이선스 메타 필드 통합
+### DA #13 (raised by owner) — Is RRF actually necessary?
+
+**Attack**: The premise that law.go.kr's existing search is weaker has not been demonstrated.
+**Result**: ✅ Demoted to a hypothesis. Phase 1 must include comparative measurement (law.go.kr vs the new engine).
 
 ---
 
-## 11. 핵심 참고 자원
+## 9. Claude's Slip Log (warning to the next session)
 
-### 외부 자원
+**To the Claude of the next session**: these are the recurring slip patterns observed in this project.
+If the same pattern resurfaces, the owner should stop the conversation immediately.
 
-- **법제처 OpenAPI**: `https://www.law.go.kr/DRF/`
-    - `lawSearch.do` (검색), `lawService.do` (조회)
-    - `target` 파라미터로 도메인 분기
-    - 기본 응답: XML, 일부 JSON 지원
-- **공공데이터포털**: `data.go.kr` (파일 데이터 형식)
-- **고용노동부 자료실**: `moel.go.kr/policy/policydata`
-- **한국법제연구원 (KLRI)**: `klri.re.kr`
-- **MCP 참고 (개발자 공개)**: `chrisryugj/korean-law-mcp`
-    - 89개 도구, 14개 노출
-    - 법제처 API 래퍼로 작동
-    - 자체 검색 인덱스 없음
+### Slip #1: Inventing terminology
 
-### 기술 참조
+**What happened**: Used "3-Layer Storage Pattern" as if it were industry-standard terminology.
+**Reality**: Not a standard term. RAGFlow's "Load vs Indexing" is the closest legitimate phrasing.
+**How owner caught it**: Asked for verification.
+**Guard rail**: When using new terminology, verify the source. No invented names.
 
-- **QMD** (`tobi/qmd`): 검색 파이프라인 레퍼런스
-    - 원본 쿼리 + 2개 확장 쿼리 → BM25/Vector 병렬 → RRF (원본 2x) → Reranker
-- **Hybrid RAG** (2025 엔터프라이즈 표준): Vector + Graph + Structured
-- **RAGFlow**: Load vs Indexing 분리 프레이밍
-- **maastrichtlawtech/fusion**: 프랑스 법률 하이브리드 검색 레퍼런스
-- **LBox Open**: 한국 판례 데이터셋 (CC BY-NC, 147k 판례)
-- **KURE / bge-m3**: 한국어 검색 임베딩
+### Slip #2: Over-reading document fragments
+
+**What happened**: Asserted "QMD's first-query-2x means hyde gets 2x weight."
+**Reality**: Both the README diagram and the CHANGELOG say "the original query gets 2x weight."
+**How owner caught it**: Attached the actual README diagram.
+**Guard rail**: When interpreting document fragments, do not synthesize speculative inferences. Verify against the source.
+
+### Slip #3: Asserting bidirectional mapping
+
+**What happened**: From the existence of an MCP terminology-mapping tool, jumped to "law.go.kr provides this officially."
+**Reality**: Only the existence of the MCP tool is verified; the data origin (direct from law.go.kr API vs separately constructed) is unknown.
+**How owner caught it**: Asked "is that really the case?"
+**Guard rail**: Do not extrapolate from "the tool exists" to "the upstream API provides it."
+
+### Slip #4: Layer trespass
+
+**What happened**: While in the Data Source Layer, drifted into ERD, chunks table, and search-index design.
+**How owner caught it**: "Hey! This is exactly what gets confusing! I told you to start from the Data Source Layer!"
+**Guard rail**: Do not move outside the layer the owner has named. "Considering" another layer and "focusing on" another layer are different.
+
+### Slip #5: Treating assumptions as facts
+
+**What happened**: Used unverified numbers like "35 cases reachable" as if confirmed.
+**How owner caught it**: DA #8 demanded measurement.
+**Guard rail**: Do not state numbers without "estimated" or "expected" qualifiers when unverified.
+
+### Slip #6: Underestimating competing products
+
+**What happened**: Asserted "the MCP is weak on natural language."
+**Reality**: The MCP handles natural language via LLM tool routing; it just lacks vector search.
+**How owner caught it**: Pointed out the contradiction with my own earlier statement.
+**Guard rail**: When evaluating competing products, weigh strengths and weaknesses simultaneously.
+
+### Common pattern
+
+The shared structure of these six slips:
+1. A piece of evidence arrives.
+2. **Inflate** its meaning by extrapolation.
+3. Present it **as if confirmed**.
+4. Owner asks for verification or points out a contradiction.
+5. Claude corrects.
+
+**Preventive behavior**:
+- Before stating new information: ask "is this confirmed or inferred?"
+- When citing numbers, standards, or official facts: state the source.
+- When evaluating a competing product: cover both strengths and weaknesses.
+- When stepping outside the explicit scope: ask permission first.
 
 ---
 
-## 12. 변경 이력 (이 문서)
+## 10. Next Session Starting Guide
 
-- v1.0: 초기 산출물 작성 (합의 사항 압축)
-- (다음 세션에서 ERD 추가, 신뢰도 마커 갱신, 새 결정사항 추가)
+**Do immediately**:
+
+1. Attach this document at the start of the next session
+2. Reconfirm the owner's **5 categories + 7 data sources** table
+3. Begin with **D-1** (statute ERD scope)
+4. Start from "Statute ERD" inside the agreed per-category source-structure (section 5)
+
+**When designing the ERD, keep these other-layer considerations in mind** (earlier agreements):
+
+- **Document Parsing Pipeline**:
+  - Mapping from law.go.kr XML to ERD fields
+  - Delegation references ("as prescribed by Presidential Decree")
+  - Criminal Code references (DA #5)
+  - Enforcement decree appendices (HWP/HWPX)
+
+- **Indexing Layer**:
+  - Stable `node_id` so chunks can reliably back-reference statutes
+  - Whether `node_id` is preserved across amendments, or versioned
+
+- **Retrieval Pipeline**:
+  - The relational structure should make it natural to return the article + appendix + delegated decree article together
+
+- **Temporality**:
+  - Phase 1 indexes only the current version, but the schema should accommodate history
+  - Reserve `effective_at`, `superseded_at` fields up front
+
+**What should naturally follow the ERD work**:
+- Document Parsing Pipeline design
+- ERDs for the other categories (judicial, interpretive, etc.)
+- Integration of license metadata fields
+
+---
+
+## 11. Key References
+
+### External resources
+
+- **law.go.kr OpenAPI**: `https://www.law.go.kr/DRF/`
+  - `lawSearch.do` (search), `lawService.do` (retrieval)
+  - `target` parameter switches the domain
+  - Default response is XML; some endpoints support JSON
+- **data.go.kr (Public Data Portal)**: file-based data format
+- **Ministry of Employment archive**: `moel.go.kr/policy/policydata`
+- **Korea Legislation Research Institute (KLRI)**: `klri.re.kr`
+- **MCP reference (community)**: `chrisryugj/korean-law-mcp`
+  - 89 internal tools, 14 surfaced
+  - Acts as a thin wrapper over the law.go.kr API
+  - No internal search index of its own
+
+### Technical references
+
+- **QMD** (`tobi/qmd`): retrieval pipeline reference
+  - Original query + 2 expansions → BM25/Vector in parallel → RRF (original 2x) → Reranker
+- **Hybrid RAG** (2025 enterprise standard): Vector + Graph + Structured
+- **RAGFlow**: Load vs Indexing framing
+- **maastrichtlawtech/fusion**: hybrid retrieval reference for French law
+- **LBox Open**: Korean case-law dataset (CC BY-NC, 147k cases)
+- **KURE / bge-m3**: Korean retrieval embeddings
+
+---
+
+## 12. Change Log
+
+- v1.0: initial artifact (compressed agreements)
+- (Next session: add ERD, refresh confidence markers, append new decisions)
