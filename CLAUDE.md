@@ -69,6 +69,29 @@ Immediate next steps:
 
 ---
 
+## 5b. Decision Protocol — ADR-First, Then Approve
+
+Any decision worth recording as an ADR (schema choice, identifier strategy,
+table-split judgment, FK shape, etc.) follows this loop:
+
+1. **Draft `docs/decisions/ADR-NNN-<slug>.md` first**, with status `Proposed`.
+   State the recommendation, alternatives considered, and rationale — strong
+   opinion expressed, not options-without-position.
+2. **Surface the draft and ask Seheon for approval explicitly.** Do not edit
+   the ERD, write DDL, or act on the decision yet.
+3. **Only after approval**: flip status to `Accepted`, then act.
+
+Decide-then-document inverts the review loop and presents Seheon a fait
+accompli. The ADR is the editable surface for the conversation, not a
+write-up after the fact. If you find yourself about to declare a decision
+without a draft ADR in front of Seheon, stop and write the ADR first.
+
+This rule applies to forward-applied decisions too — e.g., "future category
+ERDs follow the same pattern" is itself a decision and needs its own ADR or
+explicit approval.
+
+---
+
 ## 6. Claude Slip Patterns — Internalize Before Substantive Response
 
 Six recurring failure modes from prior sessions. These cost real time. Do not repeat.
