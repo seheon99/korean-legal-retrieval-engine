@@ -24,10 +24,12 @@ erDiagram
     legal_documents ||--o{ supplementary_provisions : has
     legal_documents ||--o{ annexes : has
     legal_documents ||--o{ forms : has
+    legal_documents ||--o{ legal_documents : parent_of
     structure_nodes ||--o{ structure_nodes : parent_of
 
     legal_documents {
         bigint doc_id PK "IDENTITY"
+        bigint parent_doc_id FK "self-ref: 법률→NULL, 시행령→Act doc_id (per ADR-009)"
         text law_id "법령ID - shared across versions, NOT unique"
         bigint mst UK "법령일련번호 - version-specific natural key"
         text title "법령명_한글"
@@ -154,6 +156,7 @@ Represents a single statute document as a versioned unit. One row per law-versio
 | Field | Confidence | Source / Rationale |
 |-------|-----------|-------------------|
 | `doc_id` | ✅ Resolved (TODO-4) | `BIGINT GENERATED ALWAYS AS IDENTITY`. Surrogate key. Single-column FK target for `chunks.source_id` |
+| `parent_doc_id` | ✅ Resolved (ADR-009) | `BIGINT NULL REFERENCES legal_documents(doc_id) ON DELETE RESTRICT`. Self-FK pointing to the immediately delegating document. Acts → NULL (enforced by `chk_legal_documents_act_no_parent`); Decrees → Act doc_id (populated at ingestion via title-pattern matching). Reverse traversal indexed by `ix_legal_documents_parent`; population-rule lookup uniqueness backed by `ux_legal_documents_current_act_title` (partial UNIQUE on `(title) WHERE doc_type='법률' AND is_current=true`). Rules parent assignment deferred per ADR-009 "Out of scope" #2 |
 | `law_id` | ✅ XML | `<법령ID>013993</법령ID>`. Identifies the law across versions — **not** in any UNIQUE constraint because multiple rows can share it once Phase 2 temporality is on |
 | `mst` | ✅ Resolved (TODO-4) | `<법령일련번호>228817</법령일련번호>`. Version-specific natural key. **`UNIQUE` constraint** — drives idempotent upsert on re-ingestion |
 | `title` | ✅ Sketch + XML | `<법령명_한글>` |
@@ -483,18 +486,33 @@ reflects the separate-table shape. No column changes from this decision.
 
 **Related agreement**: not in earlier sketch — raised by XML analysis on 2026-04-25, resolved 2026-04-26.
 
-### TODO-10: Act-Decree linkage mechanism
+### TODO-10: ✅ RESOLVED — `parent_doc_id` self-FK on `legal_documents`
 
-**Current state**: not discussed in earlier sessions
-**Decision needed**: how to express the relationship between a law (법률) and its enforcement decree (시행령) / rules (시행규칙)
-**Options to consider**:
-- A. No explicit FK — the relationship is implied by `title` naming convention ("X법 시행령" → parent is "X법"). Query via `LIKE` or text matching
-- B. `parent_doc_id` FK on `legal_documents` — explicit self-reference. Act is root, Decree is child, Rules is grandchild
-- C. Separate `document_relations` table — `(source_doc_id, target_doc_id, relation_type)`. More flexible, supports multiple relation types
-**Information required to decide**:
-- Whether the retrieval pipeline needs to "follow" delegation references to the decree (e.g., "제4조제2항의 구체적 사항은 대통령령으로 정한다" → fetch the relevant decree articles)
-- Volume: how many decree articles are there per act article? (시행령 XML is 97KB vs act's 42KB — roughly 2:1)
-**Related agreement**: requirement 4-2 (delegation phrases), phase-1-progress.md §10 (next session considerations)
+**Decision**: see ADR-009 (Accepted 2026-04-29).
+
+- `parent_doc_id BIGINT NULL REFERENCES legal_documents(doc_id) ON DELETE RESTRICT`.
+- Asymmetric CHECK: `chk_legal_documents_act_no_parent CHECK (doc_type != '법률' OR parent_doc_id IS NULL)` — Acts must have NULL parents; Decrees may have NULL (graceful degradation on title-match miss, audit by query).
+- Two indexes commit ahead of TODO-7's general "measure first" deferral on use-case grounds: `ix_legal_documents_parent` (reverse traversal) and `ux_legal_documents_current_act_title` (population-rule lookup uniqueness).
+- Population rule (Phase 1): for `doc_type='대통령령'`, strip ` 시행령` from `title` and look up Act with `is_current=true`. The partial UNIQUE INDEX guarantees the lookup is unambiguous.
+- Rules (총리령/부령) parent assignment is deferred — Korean 부령 제1조 typically delegates from both Act and Decree, so the heuristic needs cross-statute observation before ratification.
+
+**Empirical basis** (verified 2026-04-29): the 법제처 OpenAPI exposes
+no explicit parent-pointer field (`<상위법령>`, `<위임법령>`,
+`<모법ID>` all absent). `자법타법여부` is empty for both Phase-1
+documents. Title-pattern matching (`{Act_title} 시행령`) and 제1조
+body text (`「{parent_title}」에서 위임된 사항`) are the only
+deterministic signals; title-pattern is the primary key, 제1조 is a
+non-blocking verification.
+
+**Out of scope (deferred)**:
+- Cross-statute citations (TODO-2 territory; M:N edge-list shape, different from this 1:N tree).
+- Rules-parent assignment heuristic.
+- 위임 phrase detection in body text (retrieval-pipeline concern, not schema).
+- Phase-2 temporality of the parent relationship (TODO-5 territory).
+
+**Related agreement**: requirement 4-2 (delegation phrases),
+phase-1-progress.md §10; ADR-008 "promote when needed" policy
+exercised here for the first time post-ADR-008.
 
 ---
 
@@ -551,9 +569,9 @@ reflects the separate-table shape. No column changes from this decision.
 
 ## Next Steps
 
-1. **Resolve remaining TODOs** — TODO-2 (Criminal Code refs, blocked on T15), TODO-5 (amendment retention), TODO-7 (index strategy, deferred-by-design), TODO-10 (Act-Decree linkage) remain. TODO-1, TODO-3, TODO-4, TODO-6, TODO-8, TODO-9 are resolved
-2. **Write DDL** — convert this ERD to `migrations/001_statute_tables.sql` once the remaining TODOs are resolved
-4. **Design Document Parsing Pipeline** — XML → `legal_documents` + `structure_nodes` mapping logic
+1. **Resolve remaining TODOs** — TODO-2 (Criminal Code refs, blocked on T15), TODO-5 (amendment retention, Phase-2 temporality), TODO-7 (index strategy, deferred-by-design — though ADR-009 has committed two indexes ahead of the general ratification). TODO-1, TODO-3, TODO-4, TODO-6, TODO-8, TODO-9, TODO-10 are resolved
+2. **Write DDL** — convert this ERD to `migrations/001_statute_tables.sql` once the remaining TODOs are resolved (or once a "Phase-1 DDL freeze" decision is made — TODO-2 and TODO-5 may not block Phase 1 if they ship as additive Phase-2 ALTERs)
+4. **Design Document Parsing Pipeline** — XML → `legal_documents` + `structure_nodes` mapping logic; must include the ADR-009 ingestion-order rule (Acts before Decrees, or second-pass parent resolution)
 5. **ERDs for other categories** — judicial (`case_laws`), interpretive (`interpretations`), practical/academic (`commentaries`). Each is a separate task
 6. **Integration with chunks table** — confirm FK granularity and stability guarantees
 
