@@ -220,7 +220,19 @@ The XML uses `<조문여부>` to distinguish structural headings from actual art
 - Different key structure (`부칙키` ≠ `조문키`)
 - Different metadata (promulgation-specific, no `level` or `sort_key`)
 
-If this table is rejected, the alternative is to store 부칙 as `structure_nodes` with a special `level` value (e.g., level=0 or level=9). This is a viable option but loses type safety.
+**Placement**: separate table — confirmed by ADR-004 (TODO-9, 2026-04-26).
+
+**Chunk-source status**: **not** a chunk source in Phase 1 — ADR-005
+(2026-04-26). Rows are persisted and SQL-queryable but not surfaced
+through the hybrid retrieval pipeline. Reasoning: cross-law mention
+pattern in 일부개정 부칙 (e.g., 도서관법, 화학물질관리법) creates
+retrieval-poison; the 35804/35805 rows produce near-duplicate textual
+diffs; even the high-value Act 제정 부칙 has within-row mixed signal
+(시행일 + 다른 법률의 개정) that needs the deferred 부칙내용 parsing
+decision to clean. Reversible — revisit on the explicit triggers in
+ADR-005 ("Revisit triggers"). Trade-off: phased-enforcement carve-out
+queries (e.g., "50인 미만 적용 시기") cannot be answered via free-text
+search in Phase 1.
 
 | Field | Confidence | Source / Rationale |
 |-------|-----------|-------------------|

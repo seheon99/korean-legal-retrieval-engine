@@ -10,14 +10,15 @@
   IDENTITY scheme), ADR-003 (split FK columns on chunks — adding a future
   source column is a known, accepted extension point)
 - **Out of scope (downstream decisions, not decided here)**:
-  1. Whether `supplementary_provisions` is a chunk source. Provisional next
-     ADR. Today the chunks DDL in ADR-003 lists only `structure_node_id`
-     and `annex_id` — that omission is the live default, but it has not
-     been argued explicitly anywhere.
+  1. ~~Whether `supplementary_provisions` is a chunk source.~~
+     **Resolved by ADR-005 (2026-04-26)**: not a chunk source in
+     Phase 1.
   2. How to internally parse `부칙내용` (제N조 sub-structure inside the
      CDATA blob). Parsing/chunking decision, separate from placement.
+     **Still deferred** — only becomes live if ADR-005 is overturned.
   3. Whether to distinguish 제정 부칙 vs 일부개정 부칙 with a `kind`
-     column. Coupled with #1; defer until #1 is decided.
+     column. **Still deferred** — only becomes live if ADR-005 is
+     overturned (it was needed only for the rejected Option B).
 
 ## Context
 

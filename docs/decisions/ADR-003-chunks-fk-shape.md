@@ -1,6 +1,10 @@
 # ADR-003 — Chunks-table FK shape across multi-source retrieval
 
-- **Status**: **Accepted** (revision 2; accepted 2026-04-26)
+- **Status**: **Accepted** (revision 2; accepted 2026-04-26). The
+  Phase-1 source FK column list (`structure_node_id`, `annex_id`) is
+  closed — `supplementary_provisions` is **not** a chunk source per
+  ADR-005 (2026-04-26), confirming the omission of `provision_id`
+  here as deliberate rather than implicit.
 - **Date**: 2026-04-25 (initial draft); revised and accepted 2026-04-26
 - **Context layer**: Search-index layer (chunks)
 - **Triggers**: ADR-002's DA pass surfaced that the chunks FK shape was
