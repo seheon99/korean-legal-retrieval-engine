@@ -170,6 +170,10 @@ Why C loses:
    couples ADR-007 to TODO-8, and TODO-8's options space is its
    own design discussion (whether to use JSONB at all, on which
    tables, with what schema). ADR-007 should not pre-decide TODO-8.
+   *Update 2026-04-29*: TODO-8 is now resolved by ADR-008 — no
+   JSONB on `legal_documents`. The C rejection holds for an
+   additional reason: there is no JSONB target column for
+   `doc_type_code` to land in.
 2. **JSONB is the right shape for *unknown* metadata, not *known*
    single fields.** When you know exactly which field you want to
    capture and how it's queried, a typed column beats a JSON

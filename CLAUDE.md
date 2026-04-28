@@ -45,16 +45,17 @@ Single statute end-to-end before any generalization. Scope is intentionally narr
 
 ## 4. Current Phase
 
-**D-1: 성문규범 ERD** — in progress. ADR-001 through ADR-007 accepted.
+**D-1: 성문규범 ERD** — in progress. ADR-001 through ADR-008 accepted.
 
 **Hard rule**: API response sample comes before schema design. We do not own the data — 법제처 does. Drawing the ERD before seeing the actual XML guarantees a rewrite.
 
-ERD shape so far (per ADRs 001–007):
+ERD shape so far (per ADRs 001–008):
 - Five source tables: `legal_documents`, `structure_nodes`, `supplementary_provisions`, `annexes`, `forms` (ADR-002, ADR-004).
 - `chunks` is the unified search index. Phase-1 source FK columns are closed at two: `structure_node_id`, `annex_id` (ADR-003, ADR-005). `supplementary_provisions` is persistence-only, not a chunk source.
 - `doc_type` (TEXT + CHECK over {법률, 대통령령, 총리령, 부령}) and `level` (SMALLINT + CHECK over 1..8 → 편→장→절→관→조→항→호→목) per ADR-006. `doc_type_code TEXT NULL` sibling column captures `법종구분코드` for provenance (ADR-007).
+- No JSONB `metadata` column on either `legal_documents` or `structure_nodes` (ADR-008). Forward policy: promote when needed, omit deliberately, retain raw API XML as the canonical fallback. `chunks.metadata` JSONB is unaffected (separate role).
 
-Open ERD TODOs: TODO-2, TODO-5, TODO-7, TODO-8, TODO-10. Leading next item: **TODO-8** (JSONB on statute tables). See `docs/sessions/2026-04-28.md` for the decision-cluster state and rationale.
+Open ERD TODOs: TODO-2, TODO-5, TODO-7, TODO-10. Leading next item: **TODO-10** (Act-Decree linkage mechanism) per the next-session pointer in `docs/sessions/2026-04-28.md`.
 
 ---
 
@@ -171,4 +172,4 @@ legal-retrieval/
 
 ---
 
-*Last updated: 2026-04-28 (after ADR-007). Update on each ADR commit.*
+*Last updated: 2026-04-29 (after ADR-008). Update on each ADR commit.*

@@ -167,7 +167,7 @@ Represents a single statute document as a versioned unit. One row per law-versio
 | `competent_authority` | ✅ XML | `<소관부처>`. Text name of overseeing ministry |
 | `competent_authority_code` | ✅ XML | `<소관부처 소관부처코드="1492000">`. For reliable joins |
 | `structure_code` | ⚠️ XML | `<편장절관>09010000</편장절관>`. 8-digit code indicating which structural levels (편/장/절/관) the law uses. Encoding semantics not yet verified |
-| `legislation_reason` | ⚠️ XML | `<제개정이유내용>`. Full text of the amendment rationale. Could be large. Whether to store inline or separately is a judgment call (see TODO-8 on JSONB) |
+| `legislation_reason` | ✅ XML (storage shape per ADR-008) | `<제개정이유내용>`. Full text of the amendment rationale. Could be large; stored inline as a `TEXT` column. ADR-008 ratified column-not-JSONB as the policy for statute-table fields |
 | `source_url` | 🔶 Agreed (CLAUDE.md) | Constructed from API link |
 | `content_hash` | 🔶 Agreed (CLAUDE.md) | SHA-256 of raw XML for idempotent indexing (design principle #9) |
 | `effective_at` | 🔶 Agreed | Temporality field. Phase 1: mirrors `effective_date`. Phase 2+: enables historical queries |
@@ -421,18 +421,36 @@ constraint precedent); ADR-003 (early-bug-catching reasoning).
 - Whether partial indexes on `is_current = true` are worthwhile (Phase 1: all rows are current)
 **Related agreement**: design principle #13 (measure first, plan second) — favors Option C
 
-### TODO-8: Use of JSONB fields
+### TODO-8: ✅ RESOLVED — no JSONB on statute tables
 
-**Current state**: undecided for statute tables (agreed for `chunks.metadata`)
-**Decision needed**: whether `legal_documents` or `structure_nodes` should have a JSONB `metadata` column for semi-structured data
-**Options to consider**:
-- A. No JSONB — all fields are explicit columns. Strict, type-safe, but rigid for unexpected API fields
-- B. JSONB `metadata` on both tables — catch-all for fields not worth promoting to columns (e.g., `연락부서`, `법령명_한자`, `편장절관` details)
-- C. JSONB only on `legal_documents` — document-level metadata is more variable; node-level metadata is well-structured
-**Information required to decide**:
-- Whether other law.go.kr API responses (other law types, other API versions) return fields not captured in the current schema
-- Whether downstream consumers (retrieval pipeline, API responses) need to access these fields
-**Related agreement**: chunks table uses JSONB `metadata` per phase-1-progress.md §5
+**Decision**: see ADR-008 (Accepted 2026-04-29).
+
+- No JSONB `metadata` column on `legal_documents`.
+- No JSONB `metadata` column on `structure_nodes`.
+- Forward policy: **promote** API fields to typed columns when they
+  earn their keep, **omit deliberately** with a reasoned entry in the
+  "Not stored" list, **retain** raw API XML responses as the
+  canonical fallback for any field a future ADR decides to promote.
+- `chunks.metadata` JSONB (already agreed in phase-1-progress.md §5)
+  is unaffected — that JSONB serves a different role (retrieval-
+  pipeline-emitted features whose schema is genuinely emergent).
+
+**Empirical basis** (verified 2026-04-29): after mapping every
+element back to the ERD — note `<항>`/`<호>`/`<목>` are *not* unmapped,
+they each become a `structure_nodes` row at level 6/7/8 — the
+unmapped document-level surface is small and falls cleanly into four
+buckets (constant boolean flags, ERD's "Not stored" list, TODO-5
+amendment-tracking fields, derivable). Not the unknown-evolving-
+metadata shape that justifies a JSONB column.
+
+**Soft dependency**: the policy presumes raw API XML responses remain
+replay-available (currently `docs/api-samples/` holds samples; no
+formal pipeline-level retention commitment yet). ADR-008 flags this
+as a revisit trigger.
+
+**Related agreement**: ADR-007 (sibling-column-over-JSONB pattern that
+this ADR generalizes); phase-1-progress.md §5 (chunks.metadata
+exception).
 
 ### TODO-9: ✅ RESOLVED — keep `supplementary_provisions` as a separate table
 
@@ -533,7 +551,7 @@ reflects the separate-table shape. No column changes from this decision.
 
 ## Next Steps
 
-1. **Resolve remaining TODOs** — TODO-5 (amendment retention), TODO-6 (enum values), TODO-9 (부칙 placement), and TODO-10 (Act-Decree linkage) are the remaining blockers before DDL. TODO-1 and TODO-4 are now resolved
+1. **Resolve remaining TODOs** — TODO-2 (Criminal Code refs, blocked on T15), TODO-5 (amendment retention), TODO-7 (index strategy, deferred-by-design), TODO-10 (Act-Decree linkage) remain. TODO-1, TODO-3, TODO-4, TODO-6, TODO-8, TODO-9 are resolved
 2. **Write DDL** — convert this ERD to `migrations/001_statute_tables.sql` once the remaining TODOs are resolved
 4. **Design Document Parsing Pipeline** — XML → `legal_documents` + `structure_nodes` mapping logic
 5. **ERDs for other categories** — judicial (`case_laws`), interpretive (`interpretations`), practical/academic (`commentaries`). Each is a separate task
