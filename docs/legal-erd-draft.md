@@ -33,7 +33,7 @@ erDiagram
         text title "법령명_한글"
         text title_abbrev "법령명약칭 (nullable)"
         text law_number "공포번호 (e.g. 17907)"
-        text doc_type "법률 | 시행령 | 시행규칙 | TODO-6"
+        text doc_type "법률 | 대통령령 | 총리령 | 부령 (formal types per ADR-006)"
         text amendment_type "제정 | 일부개정 | 전부개정 | 타법개정"
         date enacted_date "공포일자"
         date effective_date "시행일자"
@@ -54,7 +54,7 @@ erDiagram
         bigint node_id PK "IDENTITY"
         bigint doc_id FK "legal_documents.doc_id"
         bigint parent_id FK "structure_nodes.node_id (self-ref)"
-        int level "1=part 2=chapter 3=section 4=division 5=article 6=paragraph 7=subparagraph 8=item TODO-6"
+        smallint level "1=편 2=장 3=절 4=관 5=조 6=항 7=호 8=목 (per ADR-006)"
         text node_key UK "조문키 - composite UK with doc_id"
         text number "e.g. 4 or 제4조의2"
         text title "조문제목 (nullable)"
@@ -158,7 +158,7 @@ Represents a single statute document as a versioned unit. One row per law-versio
 | `title` | ✅ Sketch + XML | `<법령명_한글>` |
 | `title_abbrev` | ✅ XML | `<법령명약칭>`. Present for this law ("중대재해처벌법"), nullable for others |
 | `law_number` | ✅ Sketch + XML | `<공포번호>17907</공포번호>`. Official gazette number |
-| `doc_type` | ✅ Sketch | Maps to `<법종구분>`. Enum values are TODO-6 |
+| `doc_type` | ✅ Resolved (ADR-006) | `TEXT` with `CHECK (doc_type IN ('법률', '대통령령', '총리령', '부령'))`. Stores the formal Korean type from `<법종구분>` element text — *not* the informal role names (시행령/시행규칙). The `법종구분코드` attribute (e.g., `A0002`) is **not** captured on this column; see ADR-007 (proposed) for code-capture decision |
 | `amendment_type` | ✅ XML | `<제개정구분>제정</제개정구분>`. Not in original sketch but present in XML and needed for temporality tracking |
 | `enacted_date` | ✅ Sketch + XML | `<공포일자>` |
 | `effective_date` | ✅ XML | `<시행일자>`. Distinct from enacted_date (공포 vs 시행) |
@@ -187,7 +187,7 @@ Represents a single node in the statute's hierarchical body. Self-referencing tr
 | `node_id` | ✅ Resolved (TODO-4) | `BIGINT GENERATED ALWAYS AS IDENTITY`. Surrogate key. Stability across amendments is TODO-5 |
 | `doc_id` | ✅ Resolved (TODO-4) | `BIGINT FK → legal_documents.doc_id`. Participates in the composite UK `(doc_id, node_key)` |
 | `parent_id` | ✅ Sketch | `BIGINT FK` self-reference. Root nodes (편/장/조) have `parent_id = NULL` at top level. 항 → 조, 호 → 항, 목 → 호 |
-| `level` | ✅ Sketch | Integer depth. Sketch defined 6 levels; XML reveals up to 8. Exact mapping is TODO-6 |
+| `level` | ✅ Resolved (ADR-006) | `SMALLINT` with `CHECK (level BETWEEN 1 AND 8)`. Mapping: 1=편, 2=장, 3=절, 4=관, 5=조, 6=항, 7=호, 8=목 (canonical Korean legal hierarchy) |
 | `node_key` | ✅ Resolved (TODO-4) | `<조문단위 조문키="0004001">`. API-native identifier. **Composite `UNIQUE (doc_id, node_key)`** — same key value is reused across documents, so the doc_id scope is required |
 | `number` | ✅ Sketch + XML | Article number as text. From `<조문번호>`, `<항번호>`, `<호번호>`, `<목번호>` depending on level |
 | `title` | ✅ XML | `<조문제목>`. Only present on articles (level 5). e.g., "목적", "정의", "적용범위" |
@@ -290,20 +290,35 @@ search in Phase 1.
 - Assess retrieval impact: does the pipeline need to follow references, or just co-retrieve?
 **Related agreement**: DA #5 and DA #11 in phase-1-progress.md §8
 
-### TODO-3: Phase 1 ERD scope (D-1)
+### TODO-3: ✅ RESOLVED — Phase 1 ERD scope is Option B (effectively Option A for this statute)
 
-**Current state**: undecided. This ERD is produced under **Option B** (Act + Enforcement Decree + Enforcement Rules + appendices/forms)
-**Decision needed**: confirm Option B, or choose A/C/D
-**Options to consider**:
-- A. Minimum: Act + Enforcement Decree + Enforcement Rules
-- B. Medium: A + appendices and forms (current ERD assumes this)
-- C. Wide: B + administrative regulations (notices, directives)
-- D. Full: C + local ordinances and rules
-**Information required to decide**:
-- ✅ Verified 2026-04-25: 중대재해처벌법 has **no 시행규칙**. API search for "중대재해" returns only Act (MST=228817) + 시행령 (MST=277417). Phase 1 scope is therefore Act + 시행령 + appendices in 시행령
-- Volume assessment: how many administrative regulations reference this law?
-- Whether the `doc_type` enum and current table structure can accommodate C/D without schema changes (likely yes — just new enum values)
-**Related agreement**: D-1 in phase-1-progress.md §6
+**Decision**: Option B — Act + Enforcement Decree + Enforcement Rules
++ appendices/forms. For 중대재해처벌법 specifically, this collapses to
+**Act + 시행령 + appendices** because no 시행규칙 exists for this law.
+
+**Empirical basis** (verified 2026-04-25): API search for `query=중대재해`
+on `lawSearch.do` returns exactly two records — Act (MST=228817) and
+시행령 (MST=277417). No 시행규칙 row exists in the API result set.
+The Decree carries 5 별표 (annexes) and 0 서식 (forms) — see
+`docs/api-samples/search-중대재해.xml` and `law-277417-…xml`.
+
+**Why no ADR**: this is a documentation cleanup, not a real decision.
+The choice was forced by empirical reality (no 시행규칙 exists for
+this statute), and the ERD has been produced under Option B since
+the initial sketch. ADR-001 already addresses the appendices/forms
+sub-decision. Promoting this to a full ADR would be ceremony without
+substance. Recorded here as ✅ RESOLVED for TODO-list hygiene.
+
+**Future-aware note**: Options C (administrative regulations) and D
+(local ordinances) are explicitly out of Phase 1 scope. The
+`doc_type` enum (TODO-6) should be designed to accommodate them
+without schema migration if Phase 2 expands scope — that is, prefer
+a representation that allows additive value extension over a rigid
+PG ENUM type.
+
+**Related agreement**: D-1 in phase-1-progress.md §6; ADR-001
+(appendices/forms split, which is the substantive sub-decision
+inside Option B)
 
 ### TODO-4: ✅ RESOLVED — `BIGINT IDENTITY` PK + natural-key `UNIQUE` (Option D)
 
@@ -351,38 +366,43 @@ search in Phase 1.
 - Impact on chunks: if node_id changes on amendment, all chunks referencing the old node need re-indexing
 **Related agreement**: design principle #4 (temporal-ready but not temporal-active), phase-1-progress.md §5
 
-### TODO-6: Exact enum values for `doc_type` and `level`
+### TODO-6: ✅ RESOLVED — `doc_type` and `level` enum values + representation
 
-**Current state**: undecided
-**Decision needed**: finalize the enum sets
+**Decision**: see ADR-006 (Accepted 2026-04-28).
 
-**`doc_type`** — values observed or expected:
-- ✅ `법률` (Act) — confirmed in XML (`법종구분코드="A0002"`)
-- ✅ `대통령령` (Presidential Decree / 시행령) — confirmed in XML
-- ⚠️ `총리령` (Prime Minister Decree / 시행규칙) — expected but not yet observed for this law
-- ⚠️ `부령` (Ministerial Decree / 시행규칙) — expected but not yet observed
-- ❓ `행정규칙` (Administrative regulation) — only if scope expands to Option C/D
-- ❓ `자치법규` (Local ordinance) — only if scope expands to Option D
+- `doc_type`: `TEXT` with `CHECK (doc_type IN ('법률', '대통령령',
+  '총리령', '부령'))`. Formal Korean type names (not the informal
+  role names 시행령/시행규칙); the API returns the formal value.
+- `level`: `SMALLINT` with `CHECK (level BETWEEN 1 AND 8)`. Mapping:
+  1=편, 2=장, 3=절, 4=관, 5=조, 6=항, 7=호, 8=목.
+- Representation: PG ENUM rejected (rigidity, ALTER TYPE caveats);
+  reference tables rejected (overkill for closed taxonomies with no
+  per-row metadata); CHECK constraints chosen for both.
 
-**`level`** — the sketch defined 6 levels; the XML reveals up to 8:
+**Empirical basis** (verified 2026-04-28): `lawService.do` returns
+`<법종구분>법률</법종구분>` (Act) and `<법종구분>대통령령</법종구분>`
+(Decree); `lawSearch.do` corroborates with `<법령구분명>법률</법령구분명>`
+and `<법령구분명>대통령령</법령구분명>`. 중대재해처벌법 uses level
+positions {2, 5, 6, 7, 8}; the full 1–8 set is committed because the
+hierarchy is statute-family-closed.
 
-| Level | Korean | XML element | Sketch mapping |
-|-------|--------|------------|---------------|
-| 1 | 편 (Part) | 조문여부=전문 | Sketch level 1 |
-| 2 | 장 (Chapter) | 조문여부=전문 | Sketch level 1 (conflated) |
-| 3 | 절 (Section) | 조문여부=전문 | Sketch level 2 |
-| 4 | 관 (Division) | 조문여부=전문 | Not in sketch |
-| 5 | 조 (Article) | 조문여부=조문 | Sketch level 3 |
-| 6 | 항 (Paragraph) | `<항>` | Sketch level 4 |
-| 7 | 호 (Subparagraph) | `<호>` | Sketch level 5 |
-| 8 | 목 (Item) | `<목>` | Sketch level 6 |
+**Out of scope (deferred to ADR-007 — Proposed)**:
+- Whether to capture `법종구분코드` (e.g., `A0002`, `A0007`) as a
+  sibling `doc_type_code` column on `legal_documents`. Surfaced
+  inside ADR-006's "Still open" list; promoted to its own ADR.
 
-**Note**: not all levels are used by every law. 중대재해처벌법 uses 장(2) → 조(5) → 항(6) → 호(7) → 목(8). No 편, 절, or 관.
+**Out of scope (deferred to Phase 2)**:
+- `doc_type` values for `행정규칙`, `자치법규` — pending TODO-3
+  scope expansion (currently out of Phase 1).
 
-**Information required to decide**:
-- Whether to use integer levels or text enum (`'article'`, `'paragraph'`, etc.)
-- Whether `doc_type` should be a PostgreSQL ENUM type, a CHECK constraint, or a reference table
-**Related agreement**: phase-1-progress.md §5 (per-category source-structure design)
+**Verification trigger** (per ADR-006): first ingestion of any
+statute carrying a 시행규칙 must verify that `<법종구분>` resolves to
+exactly `'총리령'` or `'부령'` — not a ministry-prefixed variant
+(e.g., `'행정안전부령'`). If observed value diverges, the CHECK set
+is revisited.
+
+**Related agreement**: phase-1-progress.md §5; ADR-002 (DB-enforced
+constraint precedent); ADR-003 (early-bug-catching reasoning).
 
 ### TODO-7: Index strategy
 
