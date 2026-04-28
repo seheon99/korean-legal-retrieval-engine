@@ -34,6 +34,7 @@ erDiagram
         text title_abbrev "법령명약칭 (nullable)"
         text law_number "공포번호 (e.g. 17907)"
         text doc_type "법률 | 대통령령 | 총리령 | 부령 (formal types per ADR-006)"
+        text doc_type_code "법종구분코드 e.g. A0002 (machine-stable; nullable, per ADR-007)"
         text amendment_type "제정 | 일부개정 | 전부개정 | 타법개정"
         date enacted_date "공포일자"
         date effective_date "시행일자"
@@ -158,7 +159,8 @@ Represents a single statute document as a versioned unit. One row per law-versio
 | `title` | ✅ Sketch + XML | `<법령명_한글>` |
 | `title_abbrev` | ✅ XML | `<법령명약칭>`. Present for this law ("중대재해처벌법"), nullable for others |
 | `law_number` | ✅ Sketch + XML | `<공포번호>17907</공포번호>`. Official gazette number |
-| `doc_type` | ✅ Resolved (ADR-006) | `TEXT` with `CHECK (doc_type IN ('법률', '대통령령', '총리령', '부령'))`. Stores the formal Korean type from `<법종구분>` element text — *not* the informal role names (시행령/시행규칙). The `법종구분코드` attribute (e.g., `A0002`) is **not** captured on this column; see ADR-007 (proposed) for code-capture decision |
+| `doc_type` | ✅ Resolved (ADR-006) | `TEXT` with `CHECK (doc_type IN ('법률', '대통령령', '총리령', '부령'))`. Stores the formal Korean type from `<법종구분>` element text — *not* the informal role names (시행령/시행규칙). Human-facing canonical |
+| `doc_type_code` | ✅ Resolved (ADR-007) | `TEXT NULL`, no CHECK. Captured at ingestion from the `법종구분코드` attribute on `<법종구분>` (e.g., `A0002` for 법률, `A0007` for 대통령령). Machine-facing stable identifier; companion to `doc_type`, not a replacement. Reachable only via `lawService.do` (the `lawSearch.do` response omits the code) |
 | `amendment_type` | ✅ XML | `<제개정구분>제정</제개정구분>`. Not in original sketch but present in XML and needed for temporality tracking |
 | `enacted_date` | ✅ Sketch + XML | `<공포일자>` |
 | `effective_date` | ✅ XML | `<시행일자>`. Distinct from enacted_date (공포 vs 시행) |
@@ -386,10 +388,12 @@ and `<법령구분명>대통령령</법령구분명>`. 중대재해처벌법 use
 positions {2, 5, 6, 7, 8}; the full 1–8 set is committed because the
 hierarchy is statute-family-closed.
 
-**Out of scope (deferred to ADR-007 — Proposed)**:
-- Whether to capture `법종구분코드` (e.g., `A0002`, `A0007`) as a
-  sibling `doc_type_code` column on `legal_documents`. Surfaced
-  inside ADR-006's "Still open" list; promoted to its own ADR.
+**Companion decision (ADR-007, Accepted 2026-04-28)**:
+- `법종구분코드` (e.g., `A0002`, `A0007`) is captured as a sibling
+  `doc_type_code TEXT NULL` column on `legal_documents`. Two
+  columns express the same fact: `doc_type` is the human-facing
+  canonical, `doc_type_code` is the machine-facing stable
+  identifier.
 
 **Out of scope (deferred to Phase 2)**:
 - `doc_type` values for `행정규칙`, `자치법규` — pending TODO-3

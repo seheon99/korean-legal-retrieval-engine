@@ -202,12 +202,11 @@ that creates the table.
   `chk_legal_documents_doc_type`) so future migrations can drop
   them by name without ambiguity. Implicit-named constraints are
   a maintenance hazard.
-- **The API's `법종구분코드` (e.g., `A0002`) is captured at
-  ingestion time but does not currently land on the schema.** If
-  Phase 2+ ever needs code-stable type tracking (e.g., the API
-  changes the Korean string but keeps the code), adding a
-  `doc_type_code TEXT` column on `legal_documents` is a non-
-  breaking migration. Out of scope for this ADR.
+- ~~**The API's `법종구분코드` (e.g., `A0002`) is captured at
+  ingestion time but does not currently land on the schema.**~~
+  **Resolved by ADR-007 (Accepted 2026-04-28)**: a sibling
+  `doc_type_code TEXT NULL` column on `legal_documents` captures
+  the API-stable code alongside the human-facing `doc_type`.
 
 ## Trade-offs accepted
 
@@ -266,9 +265,9 @@ that creates the table.
   ADR assumes. Not directly observed; inferred from taxonomy. First
   ingestion of a statute that has 시행규칙 will verify or trigger a
   small revision.
-- Whether to capture `법종구분코드` on the schema. Currently no — see
-  "Consequences" final bullet. Revisit if API-version-stability
-  becomes a real concern.
+- ~~Whether to capture `법종구분코드` on the schema.~~ **Resolved by
+  ADR-007 (Accepted 2026-04-28)**: yes, captured as `doc_type_code
+  TEXT NULL` (no CHECK).
 
 ## References
 
