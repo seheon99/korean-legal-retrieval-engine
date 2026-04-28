@@ -45,18 +45,19 @@ Single statute end-to-end before any generalization. Scope is intentionally narr
 
 ## 4. Current Phase
 
-**D-1: 성문규범 ERD** — in progress. ADR-001 through ADR-009 accepted.
+**D-1: 성문규범 ERD — frozen.** ADR-001 through ADR-010 accepted; Phase-1 statute schema committed as `migrations/001_statute_tables.sql` (per ADR-010, 2026-04-29).
 
 **Hard rule**: API response sample comes before schema design. We do not own the data — 법제처 does. Drawing the ERD before seeing the actual XML guarantees a rewrite.
 
-ERD shape so far (per ADRs 001–009):
+Phase-1 schema (per ADRs 001–010):
 - Five source tables: `legal_documents`, `structure_nodes`, `supplementary_provisions`, `annexes`, `forms` (ADR-002, ADR-004).
-- `chunks` is the unified search index. Phase-1 source FK columns are closed at two: `structure_node_id`, `annex_id` (ADR-003, ADR-005). `supplementary_provisions` is persistence-only, not a chunk source.
+- `chunks` is the unified search index (separate migration, ships with retrieval-pipeline design). Phase-1 source FK columns are closed at two: `structure_node_id`, `annex_id` (ADR-003, ADR-005). `supplementary_provisions` is persistence-only, not a chunk source.
 - `doc_type` (TEXT + CHECK over {법률, 대통령령, 총리령, 부령}) and `level` (SMALLINT + CHECK over 1..8 → 편→장→절→관→조→항→호→목) per ADR-006. `doc_type_code TEXT NULL` sibling column captures `법종구분코드` for provenance (ADR-007).
 - No JSONB `metadata` column on either `legal_documents` or `structure_nodes` (ADR-008). Forward policy: promote when needed, omit deliberately, retain raw API XML as the canonical fallback. `chunks.metadata` JSONB is unaffected (separate role).
 - `parent_doc_id` self-FK on `legal_documents` for Act↔Decree linkage (ADR-009). Asymmetric CHECK enforces "Acts have NULL parents"; partial UNIQUE INDEX on `(title) WHERE doc_type='법률' AND is_current=true` backs the population-rule lookup; reverse-traversal index on `(parent_doc_id) WHERE parent_doc_id IS NOT NULL`. Rules-parent assignment deferred until first 시행규칙-bearing statute enters scope.
+- `image_filenames TEXT[]` on `annexes` and `forms` (ADR-010 sub-decision; closes ADR-008 "Out of scope" #2).
 
-Open ERD TODOs: TODO-2, TODO-5, TODO-7. Phase-1 DDL is essentially unblocked — TODO-2 (citations) and TODO-5 (amendment temporality) can ship as additive Phase-2 ALTERs; TODO-7 (index strategy) is deferred-by-design beyond the two indexes ADR-009 already commits.
+Open ERD TODOs (TODO-2, TODO-5, TODO-7) all ship as additive Phase-2 migrations; none blocks the freeze. Current phase is **ingestion-pipeline / query-layer design**: implement ADR-009 population rule, ADR-008 raw-XML retention dependency (or trigger ADR-008 fallback), and ADR-006 verification trigger for ministry-prefixed `doc_type` variants.
 
 ---
 
@@ -173,4 +174,4 @@ legal-retrieval/
 
 ---
 
-*Last updated: 2026-04-29 (after ADR-009). Update on each ADR commit.*
+*Last updated: 2026-04-29 (after ADR-010). Update on each ADR commit.*

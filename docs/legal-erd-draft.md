@@ -1,6 +1,6 @@
 # Statute (성문규범) ERD Draft
 
-> **Status**: Draft for human review
+> **Status**: Frozen — see `migrations/001_statute_tables.sql` per ADR-010 (Accepted 2026-04-29). Future schema changes ship as additive migrations (`002_*.sql`, ...).
 > **Scope**: Option B (Act + Enforcement Decree + Enforcement Rules + appendices/forms)
 > **Basis**: earlier-session sketch (richer version) + law.go.kr XML analysis
 > **Phase 1 domain**: 중대재해처벌법 (Serious Accidents Punishment Act)

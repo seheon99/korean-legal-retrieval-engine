@@ -1,8 +1,8 @@
 # Korean Legal Retrieval Engine — Phase 1 Progress
 
-> **Status**: Data Source Layer investigation (Phase 0 in progress)
-> **Generated**: Hand-off artifact for next session recall
-> **Next session task**: Statute (성문규범) ERD → Document Parsing Pipeline
+> **Status**: Phase-1 statute ERD frozen (ADR-010, 2026-04-29). Schema committed at `migrations/001_statute_tables.sql`.
+> **Generated**: Hand-off artifact for next session recall (now superseded by ADRs 001–010 for Phase-1 statute schema decisions; this document remains canonical for cross-category context, license matrix, and DA log).
+> **Next session task**: Ingestion-pipeline / query-layer design (D-5 resolved by ADR-010).
 
 ---
 
@@ -259,12 +259,7 @@ chunks (
 
 To be resolved in the next session:
 
-❓ **D-1**: Statute ERD scope
-- A) Minimum: law + enforcement decree + enforcement rules
-- B) Medium: A + appendices and forms
-- C) Wide: B + administrative regulations (notices, directives)
-- D) Full: C + local ordinances and rules
-- (next session starting point)
+✅ **D-1: RESOLVED** — Statute ERD scope = **Option B** (Act + Enforcement Decree + Enforcement Rules + appendices/forms). For 중대재해처벌법 specifically, this collapses to Option A (no 시행규칙 exists for this statute). Resolved by TODO-3 cleanup + ADRs 001/002. Schema frozen by ADR-010 (`migrations/001_statute_tables.sql`).
 
 ❓ **D-2**: License of public-agency manuals (KOSHA guides) — which KOGL type?
 
@@ -272,7 +267,7 @@ To be resolved in the next session:
 
 ❓ **D-4**: Whether law.go.kr OpenAPI actually exposes terminology-mapping endpoints, or whether the MCP server built that data separately — needs measurement
 
-❓ **D-5**: When does Document Parsing Pipeline work begin — right after the statute ERD, or after ERDs for the other categories are also done?
+✅ **D-5: RESOLVED** — Document Parsing Pipeline (and other downstream layers) begin immediately after the Phase-1 statute DDL freeze (ADR-010). Walking-skeleton goal: 중대재해처벌법 end-to-end before generalizing. ERDs for other categories (judicial / interpretive / practical / academic) ship as parallel work, not as Phase-1 blockers.
 
 ❓ **D-6**: Whether KLRI materials are included in Phase 1 body indexing (acceptance of the Type 4 gray area)
 
@@ -486,12 +481,17 @@ The shared structure of these six slips:
 
 ## 10. Next Session Starting Guide
 
-**Do immediately**:
+**Phase-1 statute ERD is frozen** as `migrations/001_statute_tables.sql` (ADR-010, 2026-04-29). Decision context for the Phase-1 statute schema lives in `docs/decisions/ADR-001` through `ADR-010`. The current phase is **ingestion-pipeline / query-layer design** (D-5 resolved).
 
-1. Attach this document at the start of the next session
-2. Reconfirm the owner's **5 categories + 7 data sources** table
-3. Begin with **D-1** (statute ERD scope)
-4. Start from "Statute ERD" inside the agreed per-category source-structure (section 5)
+**Do immediately on next session**:
+
+1. Read `CLAUDE.md` (entry point) and the latest `docs/sessions/*.md`.
+2. Confirm scope with owner before generating output.
+3. The Phase-1 ingestion pipeline must implement:
+   - **ADR-009 population rule** — Act-before-Decree ordering; title-pattern matching to populate `parent_doc_id`.
+   - **ADR-008 raw-API-XML retention dependency** — either ratify retention as a separate decision, or trigger ADR-008's fallback (Option D named-field allowlist JSONB on `legal_documents`).
+   - **ADR-006 verification trigger** — first ingestion of any 시행규칙-bearing statute must verify `<법종구분>` resolves to exactly `'총리령'` or `'부령'`, not a ministry-prefixed variant.
+4. Open ERD TODOs (TODO-2, TODO-5, TODO-7) ship as additive Phase-2 migrations; none blocks ingestion-pipeline work.
 
 **When designing the ERD, keep these other-layer considerations in mind** (earlier agreements):
 
@@ -550,4 +550,4 @@ The shared structure of these six slips:
 ## 12. Change Log
 
 - v1.0: initial artifact (compressed agreements)
-- (Next session: add ERD, refresh confidence markers, append new decisions)
+- v1.1 (2026-04-29): Phase-1 statute ERD frozen via ADR-010 (`migrations/001_statute_tables.sql`). D-1 (statute ERD scope) and D-5 (parsing-pipeline timing) marked RESOLVED. §10 Next Session Starting Guide updated to reflect ingestion-pipeline phase. ADRs 001–010 supersede this document for Phase-1 statute schema decisions; remaining sections stay canonical for cross-category context, license matrix, and DA log.
