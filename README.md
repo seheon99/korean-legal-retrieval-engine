@@ -9,7 +9,8 @@ over orchestrator frameworks. No LangChain, no LlamaIndex.
 
 ## Status
 
-Phase 0 — schema design.
+Phase 1 — ingestion-pipeline / query-layer design. Phase-1 statute
+schema frozen as `migrations/001_statute_tables.sql` per ADR-010.
 
 - `docs/legal-erd-draft.md` — working ERD draft (statute scope, Phase 1)
 - `docs/decisions/` — ADRs, one file per decision
@@ -32,37 +33,45 @@ Statute, judicial, and interpretive data are pulled from the 법제처
 OpenAPI (`https://www.law.go.kr/DRF/`). Access requires an OC (인증키)
 registered with an IP-whitelisted endpoint.
 
-### `docs/api-samples/` is local-only
+### Raw API responses are local-only
 
-Raw 법제처 API responses used during schema design live under
-`docs/api-samples/`, which is **excluded from version control** via
-`.gitignore`. The responses contain the OC parameter inside echoed
-`법령상세링크` URLs, so they're easier to keep out of git than to scrub
-on every fetch.
+Two local-only directories hold 법제처 API responses, both gitignored:
 
-To re-create the samples on a fresh clone:
+- `data/raw/{law_id}/{mst}.xml` — canonical retention store for full
+  document responses (`lawService.do`) per
+  [ADR-011](docs/decisions/ADR-011-raw-api-xml-retention.md).
+  Indefinite retention; integrity link via `legal_documents.content_hash`.
+- `docs/api-samples/` — developer-facing samples for ADR drafting and
+  ad-hoc inspection. Search responses (`lawSearch.do`) write here.
+
+Responses contain the OC parameter echoed inside `법령상세링크` URLs,
+so they're kept out of git rather than scrubbed on every fetch.
+
+To populate both stores on a fresh clone:
 
 1. Register an OC at <https://www.law.go.kr/LSO/openApi/cuAskList.do> and
    whitelist your egress IP. (Cafe / public Wi-Fi will not work — the
    request is rejected at the IP check.)
 2. Export the OC into your shell environment, e.g. `export LAW_GO_KR_OC=...`.
-3. Fetch the Phase 1 samples (Act + 시행령 + a search response):
+3. Run the fetch script:
 
 ```bash
-mkdir -p docs/api-samples
-curl -s "https://www.law.go.kr/DRF/lawService.do?OC=$LAW_GO_KR_OC&target=law&MST=228817&type=XML" \
-  -o docs/api-samples/law-228817-중대재해처벌법.xml
-curl -s "https://www.law.go.kr/DRF/lawService.do?OC=$LAW_GO_KR_OC&target=law&MST=277417&type=XML" \
-  -o docs/api-samples/law-277417-중대재해처벌법시행령.xml
-curl -s "https://www.law.go.kr/DRF/lawSearch.do?OC=$LAW_GO_KR_OC&target=law&type=XML&display=5&query=%EC%A4%91%EB%8C%80%EC%9E%AC%ED%95%B4" \
-  -o docs/api-samples/search-중대재해.xml
+./scripts/fetch_law_samples.sh                  # Phase-1 default set
+./scripts/fetch_law_samples.sh --force          # overwrite existing
+./scripts/fetch_law_samples.sh --doc 013993 228817   # single document
+./scripts/fetch_law_samples.sh --search 중대재해      # single search
+./scripts/fetch_law_samples.sh --help
 ```
 
-A proper fetch script will land at `scripts/fetch_law_samples.sh` once
-ingestion development begins.
+The script is idempotent (skips files that exist unless `--force`) and
+writes atomically (tmp + rename) to avoid half-written files on crash.
 
-Sample-naming convention: `law-<MST>-<short-title>.xml` for full law
-fetches, `search-<keyword>.xml` for search responses.
+Path conventions:
+
+- Documents: `data/raw/{law_id}/{mst}.xml` (e.g.
+  `data/raw/013993/228817.xml` for the Act).
+- Searches: `docs/api-samples/search-{query}.xml` (e.g.
+  `docs/api-samples/search-중대재해.xml`).
 
 ## Repository layout
 
@@ -76,10 +85,13 @@ legal-retrieval/
 │   ├── decisions/           ← ADR-NNN-<slug>.md
 │   ├── sessions/            ← YYYY-MM-DD.md
 │   └── api-samples/         ← local-only (gitignored)
-├── migrations/              ← DDL versioned from day 1 (empty in Phase 0)
-├── src/                     ← Python source (empty in Phase 0)
-├── scripts/                 ← fetchers, one-off utilities (empty in Phase 0)
-└── tests/                   ← (empty in Phase 0)
+├── migrations/              ← DDL versioned from day 1 (001_statute_tables.sql per ADR-010)
+├── data/
+│   └── raw/                 ← retention store per ADR-011 (gitignored)
+├── src/                     ← Python source
+├── scripts/                 ← fetchers, one-off utilities
+│   └── fetch_law_samples.sh ← API fetch utility
+└── tests/
 ```
 
 See `CLAUDE.md` §7 for the canonical layout description.
