@@ -21,11 +21,15 @@
      trade-off.
   3. TODO-5 amendment-tracking fields (`조문이동이전`, `조문이동이후`).
      These are amendment-temporality concerns, not catch-all metadata.
-  4. Whether to formalize raw-API-XML retention as its own ADR.
+  4. ~~Whether to formalize raw-API-XML retention as its own ADR.
      ADR-008 leans on the assumption that raw responses remain
      replay-available; this ADR flags the dependency without
      drafting a separate retention ADR. If retention is later
-     formalized, a forward-pointer lands here.
+     formalized, a forward-pointer lands here.~~ **Resolved by
+     ADR-011 (Accepted 2026-05-01)**: filesystem retention at
+     `data/raw/{law_id}/{mst}.xml`, indefinite, integrity link
+     via `legal_documents.content_hash`. ADR-008's forward policy
+     is now a ratified commitment, not a soft dependency.
 
 ## Context
 
@@ -227,16 +231,19 @@ retention commitment landing. In that case ADR-008 is revisited.
 
 ## Trade-offs accepted
 
-- **Soft dependency on raw API XML retention.** The "no JSONB"
-  policy presumes that if we later need a field we currently omit,
-  we can re-derive it from the original API response. This requires
-  raw API responses to remain replay-available — either retained on
-  disk by the ingestion pipeline or re-fetchable from
-  `lawService.do`. Currently `docs/api-samples/` holds samples
-  manually; there is no formal pipeline-level retention commitment.
-  ADR-008 flags this dependency. If a future architectural decision
-  forecloses retention (e.g., compliance-driven deletion), ADR-008
-  is revisited and Option D becomes the fallback.
+- **Soft dependency on raw API XML retention.** *Update 2026-05-01:
+  the dependency is now a ratified commitment via ADR-011*
+  (filesystem retention at `data/raw/{law_id}/{mst}.xml`,
+  indefinite, integrity link via `legal_documents.content_hash`).
+  Original framing retained for context: the "no JSONB" policy
+  presumes that if we later need a field we currently omit, we can
+  re-derive it from the original API response. This requires raw
+  API responses to remain replay-available. ADR-008 flagged this
+  dependency without committing to a retention policy; ADR-011
+  closes that gap. If a future architectural decision forecloses
+  retention (e.g., compliance-driven deletion or ADR-011
+  retraction), ADR-008 is revisited and Option D becomes the
+  fallback.
 - **Cannot capture unknown future fields silently.** If 법제처
   ever adds a new element to law-detail responses, the ingestion
   parser will silently drop it until we update the parser. This is
@@ -288,8 +295,12 @@ retention commitment landing. In that case ADR-008 is revisited.
 
 ADR-008 is revisited if any of the following hold:
 
-- **Raw-API-XML retention** is explicitly *not* committed (e.g.,
-  pipeline design forecloses storage). Fallback: Option D
+- **Raw-API-XML retention is retracted.** *Update 2026-05-01:
+  retention is now committed via ADR-011, so this trigger no longer
+  fires on absence of retention but on retraction of ADR-011* (e.g.,
+  storage pressure forces lifecycle pruning that drops historical
+  versions, compliance mandates deletion windows, or ADR-011 is
+  reopened and re-decided against retention). Fallback: Option D
   (named-field allowlist JSONB on `legal_documents`).
 - **An unmapped field demonstrates eval-harness or
   retrieval-pipeline value** that cannot wait for a column-promotion

@@ -2,6 +2,11 @@
 # See README.md for re-creation instructions.
 docs/api-samples/
 
+# Raw-API-XML retention store per ADR-011.
+# Canonical fallback for un-promoted fields per ADR-008's forward policy.
+# Regenerable from law.go.kr API; not source.
+data/raw/
+
 # Environment / secrets
 .env
 .env.local
