@@ -1,0 +1,4 @@
+# Runtime deps for the ingest service image.
+# Loose major-pin; lock file lands with pyproject.toml in a follow-up.
+psycopg[binary]>=3.2,<4
+pydantic>=2.9,<3

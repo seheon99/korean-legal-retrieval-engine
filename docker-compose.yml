@@ -1,0 +1,59 @@
+# Dev compose stack for the ingestion pipeline.
+#   docker compose up                 → bring up database, run ingest, exit
+#   docker compose run --rm ingest    → re-run ingest against running database
+#   docker compose down -v            → drop database + named volume (clean slate)
+
+services:
+  database:
+    # pgvector-bundled to match eventual chunks/embeddings shape.
+    # Same Postgres 16 line we've been syntax-checking against.
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?must be set in .env}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Postgres image executes any *.sql in this dir on first boot of
+      # an empty data volume. ADR-010 freeze: only 001_statute_tables.sql
+      # exists today; future additive migrations will need a real
+      # migration tool (deferred).
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  ingest:
+    build:
+      context: .
+      dockerfile: docker/ingest.Dockerfile
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      # Password kept out of the DSN to avoid URL-encoding pitfalls
+      # when it contains @ : / ? # % &. psycopg reads PGPASSWORD
+      # from the env when the DSN omits it.
+      DATABASE_URL: postgresql://${POSTGRES_USER}@database:5432/${POSTGRES_DB}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PYTHONPATH: /app/src
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # Bind mount for dev comfort — edit on host, re-run with
+      # `docker compose run --rm ingest`. Read-only: the container
+      # has no business writing back into the source tree.
+      - ./src/ingest:/app/src/ingest:ro
+      # Raw XML store is read-only from the ingest service's POV;
+      # `scripts/fetch_law_samples.sh` (host-side) is the writer.
+      - ./data/raw:/app/data/raw:ro
+    working_dir: /app
+    command: ["python", "-m", "ingest", "--raw-dir", "data/raw"]
+    # One-shot, not a long-running service.
+    restart: "no"
+
+volumes:
+  pgdata:
