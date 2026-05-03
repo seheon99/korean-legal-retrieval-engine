@@ -1,8 +1,8 @@
 # Korean Legal Retrieval Engine — Phase 1 Progress
 
-> **Status**: Phase-1 statute ERD frozen (ADR-010, 2026-04-29). Schema committed at `migrations/001_statute_tables.sql`.
-> **Generated**: Hand-off artifact for next session recall (now superseded by ADRs 001–010 for Phase-1 statute schema decisions; this document remains canonical for cross-category context, license matrix, and DA log).
-> **Next session task**: Ingestion-pipeline / query-layer design (D-5 resolved by ADR-010).
+> **Status**: Phase-1 statute ERD frozen (ADR-010, 2026-04-29). Schema committed at `migrations/001_statute_tables.sql`. ADR-009 population rule landed and DB-verified (2026-05-03). Idempotent re-ingest landed (2026-05-03). ADR-012 keying convention accepted (2026-05-03).
+> **Generated**: Hand-off artifact for next session recall (now superseded by ADRs 001–012 for Phase-1 statute schema + ingestion decisions; this document remains canonical for cross-category context, license matrix, and DA log).
+> **Next session task**: `_insert_children` parser depth (now unblocked by ADR-012). `structure_nodes` first per ADR-005.
 
 ---
 
@@ -481,17 +481,27 @@ The shared structure of these six slips:
 
 ## 10. Next Session Starting Guide
 
-**Phase-1 statute ERD is frozen** as `migrations/001_statute_tables.sql` (ADR-010, 2026-04-29). Decision context for the Phase-1 statute schema lives in `docs/decisions/ADR-001` through `ADR-010`. The current phase is **ingestion-pipeline / query-layer design** (D-5 resolved).
+**Phase-1 statute ERD is frozen** as `migrations/001_statute_tables.sql` (ADR-010, 2026-04-29). Decision context for the Phase-1 statute schema + ingestion lives in `docs/decisions/ADR-001` through `ADR-012`. The current phase is **ingestion-pipeline implementation** (D-5 resolved; ADR-009 population rule landed and DB-verified 2026-05-03; idempotent re-ingest landed; ADR-012 keying convention accepted).
 
 **Do immediately on next session**:
 
 1. Read `CLAUDE.md` (entry point) and the latest `docs/sessions/*.md`.
 2. Confirm scope with owner before generating output.
-3. The Phase-1 ingestion pipeline must implement:
-   - **ADR-009 population rule** — Act-before-Decree ordering; title-pattern matching to populate `parent_doc_id`.
-   - **ADR-008 raw-API-XML retention dependency** — either ratify retention as a separate decision, or trigger ADR-008's fallback (Option D named-field allowlist JSONB on `legal_documents`).
-   - **ADR-006 verification trigger** — first ingestion of any 시행규칙-bearing statute must verify `<법종구분>` resolves to exactly `'총리령'` or `'부령'`, not a ministry-prefixed variant.
-4. Open ERD TODOs (TODO-2, TODO-5, TODO-7) ship as additive Phase-2 migrations; none blocks ingestion-pipeline work.
+3. **`_insert_children` parser depth** is now top of the queue (unblocked by ADR-012). Walk the `<조문>` block, derive `node_key` per ADR-012 §1, set `parent_id` per the level hierarchy, populate the remaining `structure_nodes` columns from XML. Then `supplementary_provisions`, `annexes`, `forms` in order. `structure_nodes` is the highest-leverage piece per ADR-005 (primary chunk source).
+4. **ADR-012 verification triggers** ship alongside `_insert_children`: (a) 조문키 shape `^[0-9]{7}$` + decoded `<조문번호>`/`<조문가지번호>`/`<조문여부>` agreement; (b) halt on any `<항가지번호>` / `<목가지번호>` / level-1..4 가지번호 element (per *법령의개정방식과폐지방식*: branches at 조 + 호 only).
+5. **ADR-006 verification trigger** still pending — fires on first ingestion of any 시행규칙-bearing statute (must verify `<법종구분>` is exactly `'총리령'` or `'부령'`, not a ministry-prefixed variant).
+6. **Amendment-tracking ADR (ADR-013 placeholder)** — decides what `_skip_if_present`'s mismatch branch should do for real amendments. Today: hard fail (`ContentMismatchError`). Future: auto-supersede pattern. Tied to TODO-5 + ADR-012 Trade-off §4 (sub-조 key fragility across amendments).
+7. Open ERD TODOs (TODO-2, TODO-5, TODO-7) ship as additive Phase-2 migrations; none blocks ingestion-pipeline work.
+
+**Closed dependencies** (no longer on the implement-list):
+- ADR-008 raw-API-XML retention dependency — closed by ADR-011 on 2026-05-01.
+- ADR-009 population rule — landed and DB-verified on 2026-05-03 (one Act + one Decree, parent FK populated correctly).
+- Idempotent re-ingest — landed on 2026-05-03 with `_skip_if_present` + `ContentMismatchError`.
+
+**Phase-2 follow-up parking lot** (separate ADRs at the boundary):
+- Drop `sort_key` column per ADR-012 §Consequences — redundant with tagless `node_key` under the accepted encoding.
+- Migration tool selection (sqitch / dbmate / Alembic) when `002_*.sql` ships.
+- Packaging (`pyproject.toml`) when host-side Python work is needed beyond Docker.
 
 **When designing the ERD, keep these other-layer considerations in mind** (earlier agreements):
 
@@ -551,3 +561,4 @@ The shared structure of these six slips:
 
 - v1.0: initial artifact (compressed agreements)
 - v1.1 (2026-04-29): Phase-1 statute ERD frozen via ADR-010 (`migrations/001_statute_tables.sql`). D-1 (statute ERD scope) and D-5 (parsing-pipeline timing) marked RESOLVED. §10 Next Session Starting Guide updated to reflect ingestion-pipeline phase. ADRs 001–010 supersede this document for Phase-1 statute schema decisions; remaining sections stay canonical for cross-category context, license matrix, and DA log.
+- v1.2 (2026-05-03): ADR-009 population rule landed and DB-verified end-to-end (one Act + one Decree ingested via `python -m ingest` against pgvector/pgvector:pg16 dev stack; parent FK resolved correctly via title-strip + UNIQUE INDEX). Idempotent re-ingest landed via `_skip_if_present` + `ContentMismatchError`. ADR-012 accepted: `structure_nodes` keying convention (tagless `{조문키}-{HH}-{NN}{BB}-{KK}`) + sort_key format + branch-numbering scope (조 + 호 only per *법령의개정방식과폐지방식*) + verification triggers. §10 Next Session Starting Guide rewritten around `_insert_children` parser depth, ADR-012 verification triggers, ADR-006 verification trigger (still pending), and amendment-tracking ADR-013 (placeholder). Phase-2 follow-up parking lot recorded (drop sort_key, migration tool, packaging). ADR range supersedes this document expanded from ADRs 001–010 to ADRs 001–012.
