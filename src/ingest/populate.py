@@ -30,6 +30,17 @@ PHASE_ORDER: tuple[DocType, ...] = ("법률", "대통령령", "총리령", "부�
 DECREE_SUFFIX = " 시행령"
 
 
+class ContentMismatchError(Exception):
+    """Same MST exists with a different `content_hash` — substantive
+    change that requires the (deferred) amendment-tracking flow.
+
+    Fail-fast posture: silent overwrite would lose the prior version
+    without setting `superseded_at` / `is_current=FALSE`. The
+    amendment-track decision is its own ADR (TODO-5 territory) and
+    not in scope here.
+    """
+
+
 def run(raw_dir: Path, *, dsn: str | None = None) -> None:
     """Walk `raw_dir`, parse all docs, then load in phase order."""
     dsn = dsn or os.environ.get("DATABASE_URL")
@@ -55,9 +66,41 @@ def run(raw_dir: Path, *, dsn: str | None = None) -> None:
             logger.info("phase %s: %d doc(s)", doc_type, len(docs))
             with conn.transaction():
                 for doc in docs:
+                    if _skip_if_present(conn, doc):
+                        continue
                     parent_doc_id = _resolve_parent(conn, doc)
                     new_id = _insert_legal_document(conn, doc, parent_doc_id)
                     _insert_children(conn, doc, new_id)
+
+
+def _skip_if_present(conn: Connection, doc: Document) -> bool:
+    """Idempotent re-ingest: True if a row with `doc.mst` already
+    exists and its `content_hash` matches; raise on mismatch.
+
+    Match → no-op (don't INSERT, don't recurse into children).
+    Mismatch → ContentMismatchError (substantive change; out of scope).
+    Absent → False (caller proceeds with INSERT).
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT doc_id, content_hash FROM legal_documents WHERE mst = %s",
+            (doc.mst,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return False
+    existing_id, existing_hash = row
+    if existing_hash == doc.content_hash:
+        logger.info(
+            "skip mst=%d (%s, doc_id=%d) — content_hash match",
+            doc.mst, doc.title, existing_id,
+        )
+        return True
+    raise ContentMismatchError(
+        f"mst={doc.mst} ({doc.title!r}) exists with different content_hash; "
+        f"existing={existing_hash[:12]}…, incoming={doc.content_hash[:12]}…. "
+        f"Substantive change — amendment tracking is deferred (TODO-5)."
+    )
 
 
 def _resolve_parent(conn: Connection, doc: Document) -> int | None:
