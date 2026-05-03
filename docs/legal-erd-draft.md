@@ -193,11 +193,11 @@ Represents a single node in the statute's hierarchical body. Self-referencing tr
 | `doc_id` | ✅ Resolved (TODO-4) | `BIGINT FK → legal_documents.doc_id`. Participates in the composite UK `(doc_id, node_key)` |
 | `parent_id` | ✅ Sketch | `BIGINT FK` self-reference. Root nodes (편/장/조) have `parent_id = NULL` at top level. 항 → 조, 호 → 항, 목 → 호 |
 | `level` | ✅ Resolved (ADR-006) | `SMALLINT` with `CHECK (level BETWEEN 1 AND 8)`. Mapping: 1=편, 2=장, 3=절, 4=관, 5=조, 6=항, 7=호, 8=목 (canonical Korean legal hierarchy) |
-| `node_key` | ✅ Resolved (TODO-4) | `<조문단위 조문키="0004001">`. API-native identifier. **Composite `UNIQUE (doc_id, node_key)`** — same key value is reused across documents, so the doc_id scope is required |
+| `node_key` | ✅ Resolved (TODO-4 levels 1–5; ADR-012 levels 6–8) | Levels 1–5: `<조문단위 조문키="0004001">` API-native; encodes 조문가지번호 directly (e.g., `0104021` for 제104조의2). Levels 6–8: tagless positional segments appended — `{조문키}-{HH}-{NN}{BB}-{KK}`. Ordinal at 항/목; parsed `<호번호>`+`<호가지번호>` at 호. **Composite `UNIQUE (doc_id, node_key)`**. |
 | `number` | ✅ Sketch + XML | Article number as text. From `<조문번호>`, `<항번호>`, `<호번호>`, `<목번호>` depending on level |
 | `title` | ✅ XML | `<조문제목>`. Only present on articles (level 5). e.g., "목적", "정의", "적용범위" |
 | `content` | ✅ Sketch ("text") | Renamed from sketch's `text` to avoid SQL keyword collision. Contains `<조문내용>`, `<항내용>`, `<호내용>`, or `<목내용>` |
-| `sort_key` | ✅ Sketch | For correct ordering. Handles irregular numbering like 제39조의2의2 |
+| `sort_key` | ✅ Resolved (ADR-012) | Tagless dot-separated extension of 조문키: `{조문키}.{HH}.{NN}{BB}.{KK}`. Equivalent to `node_key` modulo separator (`-` ↔ `.`). Phase-2 follow-up: drop column per ADR-012 §Consequences. |
 | `effective_date` | ✅ XML | `<조문시행일자>`. Per-article effective date — can differ from the document-level date for amended articles |
 | `is_changed` | ⚠️ XML | `<조문변경여부>`. Whether this article was modified in this version. Useful for amendment tracking |
 | `source_url` | 🔶 Consistent | Nullable. For nodes that have a direct API link |

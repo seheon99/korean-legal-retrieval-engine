@@ -162,6 +162,14 @@ These are tracked as verification work, not as blockers for this ADR.
 - TODO-5 (amendment retention policy) may add a *second* UNIQUE constraint to
   some tables (e.g., `(law_id, effective_at)` on `legal_documents`) but does
   not invalidate the constraints established here.
+- **Forward-pointer (ADR-012, Accepted 2026-05-03)**: the
+  "Natural-key source: `<조문단위 조문키>`" line for `structure_nodes`
+  in this ADR's per-table table covers levels 1–5 only. ADR-012 extends
+  the convention to levels 6–8 (sub-조 nodes that are *nested inside*
+  `<조문단위>` and carry no API-native key) — tagless positional
+  segments appended after `조문키`: ordinal at 항/목, parsed
+  `<호번호>`+`<호가지번호>` at 호. The UNIQUE `(doc_id, node_key)`
+  constraint defined here remains load-bearing under that extension.
 
 ## References
 

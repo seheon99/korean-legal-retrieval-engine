@@ -45,7 +45,7 @@ Single statute end-to-end before any generalization. Scope is intentionally narr
 
 ## 4. Current Phase
 
-**D-1: 성문규범 ERD — frozen.** ADR-001 through ADR-010 accepted; Phase-1 statute schema committed as `migrations/001_statute_tables.sql` (per ADR-010, 2026-04-29).
+**D-1: 성문규범 ERD — frozen.** ADR-001 through ADR-012 accepted; Phase-1 statute schema committed as `migrations/001_statute_tables.sql` (per ADR-010, 2026-04-29).
 
 **Hard rule**: API response sample comes before schema design. We do not own the data — 법제처 does. Drawing the ERD before seeing the actual XML guarantees a rewrite.
 
@@ -57,8 +57,9 @@ Phase-1 schema (per ADRs 001–010):
 - Raw API XML retention committed via ADR-011: filesystem store at `data/raw/{law_id}/{mst}.xml`, indefinite retention, plain UTF-8, gitignored. Integrity link: SHA-256 of file = `legal_documents.content_hash`. Closes ADR-008's soft retention dependency.
 - `parent_doc_id` self-FK on `legal_documents` for Act↔Decree linkage (ADR-009). Asymmetric CHECK enforces "Acts have NULL parents"; partial UNIQUE INDEX on `(title) WHERE doc_type='법률' AND is_current=true` backs the population-rule lookup; reverse-traversal index on `(parent_doc_id) WHERE parent_doc_id IS NOT NULL`. Rules-parent assignment deferred until first 시행규칙-bearing statute enters scope.
 - `image_filenames TEXT[]` on `annexes` and `forms` (ADR-010 sub-decision; closes ADR-008 "Out of scope" #2).
+- `structure_nodes.node_key` / `sort_key` population rules per ADR-012 (2026-05-03): tagless ASCII format `{조문키}-{HH}-{NN}{BB}-{KK}` with ordinal at 항/목, parsed `<호번호>`+`<호가지번호>` at 호. Branch numbering scope per *법령의개정방식과폐지방식* — 조 and 호 only; verification trigger halts on any branch element at 편/장/절/관/항/목. **Phase-2 follow-up**: drop `sort_key` column (redundant with tagless `node_key`).
 
-Open ERD TODOs (TODO-2, TODO-5, TODO-7) all ship as additive Phase-2 migrations; none blocks the freeze. Current phase is **ingestion-pipeline / query-layer design**: implement ADR-009 population rule and ADR-006 verification trigger for ministry-prefixed `doc_type` variants. ADR-011 closed the ADR-008 retention dependency on 2026-05-01.
+Open ERD TODOs (TODO-2, TODO-5, TODO-7) all ship as additive Phase-2 migrations; none blocks the freeze. Current phase is **ingestion-pipeline / query-layer implementation**: ADR-009 population rule landed and DB-verified (2026-05-03); idempotent re-ingest landed; ADR-012 keying convention accepted but `_insert_children` parser depth not yet implemented. ADR-006 verification trigger for ministry-prefixed `doc_type` and ADR-012's branch-element trigger remain unimplemented (defensive boundary work).
 
 ---
 
@@ -175,4 +176,4 @@ legal-retrieval/
 
 ---
 
-*Last updated: 2026-05-01 (after ADR-011). Update on each ADR commit.*
+*Last updated: 2026-05-03 (after ADR-012). Update on each ADR commit.*
