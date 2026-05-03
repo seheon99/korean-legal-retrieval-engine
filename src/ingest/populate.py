@@ -1,0 +1,140 @@
+"""Three-phase ingestion orchestrator (ADR-009 population rule).
+
+Phase 1 — 법률    : parent_doc_id = NULL.
+Phase 2 — 대통령령: lookup parent Act via title-strip + UNIQUE INDEX.
+Phase 3 — 총리령/부령: parent_doc_id = NULL (ADR-009 patch #5
+                       defers 부령 제1조 delegation parsing).
+
+Children-table inserts (structure_nodes / supplementary_provisions /
+annexes / forms) are the deferred parser depth — `_insert_children`
+is a documented stub for now.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from collections import defaultdict
+from pathlib import Path
+
+import psycopg
+from psycopg import Connection
+
+from .parse import discover, parse_doc
+from .records import Document, DocType
+
+
+logger = logging.getLogger(__name__)
+
+PHASE_ORDER: tuple[DocType, ...] = ("법률", "대통령령", "총리령", "부령")
+DECREE_SUFFIX = " 시행령"
+
+
+def run(raw_dir: Path, *, dsn: str | None = None) -> None:
+    """Walk `raw_dir`, parse all docs, then load in phase order."""
+    dsn = dsn or os.environ.get("DATABASE_URL")
+    if not dsn:
+        raise SystemExit(
+            "DATABASE_URL not set; pass --db-url or export it before running."
+        )
+
+    by_type: dict[DocType, list[Document]] = defaultdict(list)
+    for path in discover(raw_dir):
+        doc = parse_doc(path)
+        by_type[doc.doc_type].append(doc)
+        logger.info("parsed %s (%s, mst=%d)", doc.title, doc.doc_type, doc.mst)
+
+    # One transaction per phase: Phase N's COMMIT must be visible to
+    # Phase N+1's parent-lookup SELECT. Same connection, default
+    # READ COMMITTED — visibility kicks in at COMMIT.
+    with psycopg.connect(dsn) as conn:
+        for doc_type in PHASE_ORDER:
+            docs = by_type.get(doc_type, [])
+            if not docs:
+                continue
+            logger.info("phase %s: %d doc(s)", doc_type, len(docs))
+            with conn.transaction():
+                for doc in docs:
+                    parent_doc_id = _resolve_parent(conn, doc)
+                    new_id = _insert_legal_document(conn, doc, parent_doc_id)
+                    _insert_children(conn, doc, new_id)
+
+
+def _resolve_parent(conn: Connection, doc: Document) -> int | None:
+    """Apply the ADR-009 population rule — the load-bearing piece."""
+    if doc.doc_type == "법률":
+        return None
+
+    if doc.doc_type == "대통령령":
+        if not doc.title.endswith(DECREE_SUFFIX):
+            raise ValueError(
+                f"Decree title {doc.title!r} does not end in "
+                f"{DECREE_SUFFIX!r}; cannot derive parent Act title."
+            )
+        act_title = doc.title[: -len(DECREE_SUFFIX)]
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT doc_id FROM legal_documents "
+                "WHERE title = %s AND doc_type = '법률' AND is_current = TRUE",
+                (act_title,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            raise LookupError(
+                f"No current Act titled {act_title!r} for Decree "
+                f"{doc.title!r}; ADR-009 Act-before-Decree ordering violated."
+            )
+        return row[0]
+
+    # 총리령 / 부령 — deferred per ADR-009 patch #5.
+    return None
+
+
+def _insert_legal_document(
+    conn: Connection, doc: Document, parent_doc_id: int | None
+) -> int:
+    sql = """
+        INSERT INTO legal_documents (
+          parent_doc_id, law_id, mst, title, title_abbrev, law_number,
+          doc_type, doc_type_code, amendment_type, enacted_date,
+          effective_date, competent_authority, competent_authority_code,
+          structure_code, legislation_reason, source_url, content_hash,
+          is_current
+        ) VALUES (
+          %(parent_doc_id)s, %(law_id)s, %(mst)s, %(title)s,
+          %(title_abbrev)s, %(law_number)s, %(doc_type)s,
+          %(doc_type_code)s, %(amendment_type)s, %(enacted_date)s,
+          %(effective_date)s, %(competent_authority)s,
+          %(competent_authority_code)s, %(structure_code)s,
+          %(legislation_reason)s, %(source_url)s, %(content_hash)s,
+          TRUE
+        )
+        RETURNING doc_id
+    """
+    params = doc.model_dump(exclude={"xml_path"})
+    params["parent_doc_id"] = parent_doc_id
+    with conn.cursor() as cur:
+        cur.execute(sql, params)
+        row = cur.fetchone()
+    assert row is not None  # RETURNING always yields one row on success
+    doc_id = row[0]
+    logger.info(
+        "inserted doc_id=%d (%s, parent_doc_id=%s)",
+        doc_id, doc.title, parent_doc_id,
+    )
+    return doc_id
+
+
+def _insert_children(conn: Connection, doc: Document, doc_id: int) -> None:
+    """Stub for the Mermaid skeleton's `INSERT children` box.
+
+    Parses and inserts:
+      - structure_nodes (편/장/절/관/조/항/호/목 → levels 1..8 per ADR-006)
+      - supplementary_provisions (부칙)
+      - annexes (별표)
+      - forms (별지서식)
+
+    Deferred — population-rule walking skeleton lands the parent-FK
+    flow first; parser depth is the next session's work.
+    """
+    return
