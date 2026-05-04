@@ -1,6 +1,7 @@
 # Statute (성문규범) ERD Draft
 
 > **Status**: Frozen — see `migrations/001_statute_tables.sql` per ADR-010 (Accepted 2026-04-29). Future schema changes ship as additive migrations (`002_*.sql`, ...).
+> **Amendments**: ADR-013 replaces `is_current` with `is_head`. ADR-014 adds parallel `annex_attachments` / `form_attachments` tables, moves binary references out of `annexes` / `forms`, and defers `attachment_blobs`.
 > **Scope**: Option B (Act + Enforcement Decree + Enforcement Rules + appendices/forms)
 > **Basis**: earlier-session sketch (richer version) + law.go.kr XML analysis
 > **Phase 1 domain**: 중대재해처벌법 (Serious Accidents Punishment Act)
@@ -26,6 +27,8 @@ erDiagram
     legal_documents ||--o{ forms : has
     legal_documents ||--o{ legal_documents : parent_of
     structure_nodes ||--o{ structure_nodes : parent_of
+    annexes ||--o{ annex_attachments : has
+    forms ||--o{ form_attachments : has
 
     legal_documents {
         bigint doc_id PK "IDENTITY"
@@ -48,7 +51,7 @@ erDiagram
         text content_hash "SHA-256 of raw XML"
         timestamptz effective_at "Phase 2 temporality"
         timestamptz superseded_at "Phase 2 temporality"
-        boolean is_current "Phase 1: always true"
+        boolean is_head "Latest ingested version in law_id lineage (ADR-013)"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -69,7 +72,7 @@ erDiagram
         text content_hash "SHA-256 of content"
         timestamptz effective_at "Phase 2 temporality"
         timestamptz superseded_at "Phase 2 temporality"
-        boolean is_current "Phase 1: always true"
+        boolean is_head "Latest ingested version in doc lineage (ADR-013)"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -94,18 +97,24 @@ erDiagram
         text title "별표제목"
         text content_text "별표내용 inline text - SEARCH TARGET"
         text content_format "prose | table | mixed (parser-stage hint)"
-        text hwp_file_url "별표서식파일링크"
-        text hwp_filename "별표HWP파일명"
-        text pdf_file_url "별표서식PDF파일링크"
-        text pdf_filename "별표PDF파일명"
-        text image_filenames "별표이미지파일명[] - JSONB or text array"
         text source_url
         text content_hash "SHA-256 of content_text"
         timestamptz effective_at "Phase 2 temporality"
         timestamptz superseded_at "Phase 2 temporality"
-        boolean is_current "Phase 1: always true"
+        boolean is_head "Latest ingested version in doc lineage (ADR-013)"
         timestamptz created_at
         timestamptz updated_at
+    }
+
+    annex_attachments {
+        bigint attachment_id PK "IDENTITY"
+        bigint annex_id FK "annexes.annex_id"
+        text attachment_type "hwp | pdf | image"
+        text source_attachment_url "exact upstream API link; provenance only"
+        text source_filename "original filename from API"
+        text stored_file_path "application-controlled storage path"
+        text checksum_sha256 "SHA-256 of stored binary"
+        timestamptz fetched_at "download timestamp"
     }
 
     forms {
@@ -115,17 +124,23 @@ erDiagram
         text number "별표번호"
         text branch_number "별표가지번호"
         text title "별표제목 - SEARCH TARGET (only metadata)"
-        text hwp_file_url "별표서식파일링크"
-        text hwp_filename "별표HWP파일명"
-        text pdf_file_url "별표서식PDF파일링크"
-        text pdf_filename "별표PDF파일명"
-        text image_filenames "별표이미지파일명[]"
         text source_url
         timestamptz effective_at "Phase 2 temporality"
         timestamptz superseded_at "Phase 2 temporality"
-        boolean is_current "Phase 1: always true"
+        boolean is_head "Latest ingested version in doc lineage (ADR-013)"
         timestamptz created_at
         timestamptz updated_at
+    }
+
+    form_attachments {
+        bigint attachment_id PK "IDENTITY"
+        bigint form_id FK "forms.form_id"
+        text attachment_type "hwp | pdf | image"
+        text source_attachment_url "exact upstream API link; provenance only"
+        text source_filename "original filename from API"
+        text stored_file_path "application-controlled storage path"
+        text checksum_sha256 "SHA-256 of stored binary"
+        timestamptz fetched_at "download timestamp"
     }
 ```
 
@@ -142,6 +157,17 @@ chunks.source_node_id → structure_nodes.node_id  (article body)
 
 **Forms are intentionally excluded from the search index.** Form bodies arrive as ASCII box-drawing text in `<별표내용>` — usable for display but actively harmful as retrieval input. Forms are reachable through metadata search (title, document_id) only.
 
+Retrieval semantics:
+
+```text
+annexes -> chunks -> BM25/vector
+forms -> metadata only
+annex_attachments / form_attachments -> provenance and storage only
+```
+
+Attachments are not retrieval documents. They may support display,
+download, or future text extraction, but they are not indexed directly.
+
 This ERD must provide **stable identifiers** for chunks to back-reference.
 See TODO-5 for retention policy.
 
@@ -156,7 +182,7 @@ Represents a single statute document as a versioned unit. One row per law-versio
 | Field | Confidence | Source / Rationale |
 |-------|-----------|-------------------|
 | `doc_id` | ✅ Resolved (TODO-4) | `BIGINT GENERATED ALWAYS AS IDENTITY`. Surrogate key. Single-column FK target for `chunks.source_id` |
-| `parent_doc_id` | ✅ Resolved (ADR-009) | `BIGINT NULL REFERENCES legal_documents(doc_id) ON DELETE RESTRICT`. Self-FK pointing to the immediately delegating document. Acts → NULL (enforced by `chk_legal_documents_act_no_parent`); Decrees → Act doc_id (populated at ingestion via title-pattern matching). Reverse traversal indexed by `ix_legal_documents_parent`; population-rule lookup uniqueness backed by `ux_legal_documents_current_act_title` (partial UNIQUE on `(title) WHERE doc_type='법률' AND is_current=true`). Rules parent assignment deferred per ADR-009 "Out of scope" #2 |
+| `parent_doc_id` | ✅ Resolved (ADR-009, amended by ADR-013) | `BIGINT NULL REFERENCES legal_documents(doc_id) ON DELETE RESTRICT`. Self-FK pointing to the immediately delegating document. Acts → NULL (enforced by `chk_legal_documents_act_no_parent`); Decrees → Act doc_id (populated at ingestion via title-pattern matching). Reverse traversal indexed by `ix_legal_documents_parent`; population-rule lookup uniqueness should be backed by a head-row partial UNIQUE on `(title) WHERE doc_type='법률' AND is_head=true`. Rules parent assignment deferred per ADR-009 "Out of scope" #2 |
 | `law_id` | ✅ XML | `<법령ID>013993</법령ID>`. Identifies the law across versions — **not** in any UNIQUE constraint because multiple rows can share it once Phase 2 temporality is on |
 | `mst` | ✅ Resolved (TODO-4) | `<법령일련번호>228817</법령일련번호>`. Version-specific natural key. **`UNIQUE` constraint** — drives idempotent upsert on re-ingestion |
 | `title` | ✅ Sketch + XML | `<법령명_한글>` |
@@ -173,9 +199,9 @@ Represents a single statute document as a versioned unit. One row per law-versio
 | `legislation_reason` | ✅ XML (storage shape per ADR-008) | `<제개정이유내용>`. Full text of the amendment rationale. Could be large; stored inline as a `TEXT` column. ADR-008 ratified column-not-JSONB as the policy for statute-table fields |
 | `source_url` | 🔶 Agreed (CLAUDE.md) | Constructed from API link |
 | `content_hash` | 🔶 Agreed (CLAUDE.md) | SHA-256 of raw XML for idempotent indexing (design principle #9) |
-| `effective_at` | 🔶 Agreed | Temporality field. Phase 1: mirrors `effective_date`. Phase 2+: enables historical queries |
-| `superseded_at` | 🔶 Agreed | Temporality field. Phase 1: null for all current rows |
-| `is_current` | 🔶 Agreed | Phase 1: always `true` |
+| `effective_at` | ✅ Resolved (ADR-013) | Temporality field. Mirrors the document's legal effective timestamp. Used with `superseded_at` to compute legal effectiveness at `:as_of` |
+| `superseded_at` | ✅ Resolved (ADR-013) | Temporality field. Null for the head row; set to the incoming version's `effective_at` when superseded |
+| `is_head` | ✅ Resolved (ADR-013) | Latest ingested version within a `law_id` lineage. Does not mean legally effective now |
 | `created_at`, `updated_at` | ✅ Auto-apply | Standard audit fields |
 
 **Not stored (deliberate omissions)**:
@@ -202,7 +228,7 @@ Represents a single node in the statute's hierarchical body. Self-referencing tr
 | `is_changed` | ⚠️ XML | `<조문변경여부>`. Whether this article was modified in this version. Useful for amendment tracking |
 | `source_url` | 🔶 Consistent | Nullable. For nodes that have a direct API link |
 | `content_hash` | 🔶 Design principle #9 | For idempotent indexing at node level |
-| `effective_at`, `superseded_at`, `is_current` | 🔶 Agreed | Same temporality pattern as legal_documents |
+| `effective_at`, `superseded_at`, `is_head` | ✅ Resolved (ADR-013) | Same temporality/head-version pattern as legal_documents. Legal effectiveness is computed from timestamps, not `is_head` |
 | `created_at`, `updated_at` | ✅ Auto-apply | Standard audit fields |
 
 **XML field mapping for `조문여부`**:
@@ -275,7 +301,20 @@ search in Phase 1.
 **Schema implications applied**:
 - `annexes.content_text` populated from `<별표내용>` in Phase 1 — no HWP parsing needed
 - `forms` has no `content_text` column — title and metadata only
-- Both share file-attachment columns (HWP, PDF, image) for downstream display
+- Annex binary references live in `annex_attachments` (ADR-014):
+  `source_attachment_url` preserves the upstream API value for provenance,
+  while `stored_file_path` is reserved for application-controlled storage.
+  These roles must not be mixed.
+- Form binary references use parallel `form_attachments` with the same
+  source/storage columns. The only structural difference is the owner FK
+  (`annex_id` vs `form_id`); the semantic difference is that annex
+  attachments support chunk-source legal content, while form attachments
+  are the primary usable artifacts for metadata-only form rows.
+- ADR-014 rejects a shared polymorphic `attachments` table and a shared
+  nullable-owner table, aligning with ADR-003's explicit-FK pattern.
+- `attachment_blobs` is deferred until deduplication, shared reuse,
+  refetch lifecycle, garbage collection, or storage-backend abstraction
+  becomes load-bearing.
 - `chunks` source FK points to `annexes.annex_id` for annex chunks; forms are not a chunk source
 
 **Related agreement**: DA #2 — appendices are part of the statute. phase-1-progress.md §2
@@ -337,7 +376,9 @@ inside Option B)
 | `structure_nodes` | `node_id BIGINT IDENTITY` | `UNIQUE (doc_id, node_key)` | `<조문단위 조문키>` |
 | `supplementary_provisions` | `provision_id BIGINT IDENTITY` | `UNIQUE (doc_id, provision_key)` | `<부칙단위 부칙키>` |
 | `annexes` | `annex_id BIGINT IDENTITY` | `UNIQUE (doc_id, annex_key)` | `<별표단위 별표키>` (E suffix) |
+| `annex_attachments` | `attachment_id BIGINT IDENTITY` | none in ADR-014 | attachment rows derived from `<별표단위>` HWP/PDF/image fields |
 | `forms` | `form_id BIGINT IDENTITY` | `UNIQUE (doc_id, form_key)` | `<별표단위 별표키>` (F suffix) |
+| `form_attachments` | `attachment_id BIGINT IDENTITY` | none in ADR-014 | attachment rows derived from future `<별표단위>` 서식 HWP/PDF/image fields |
 
 **Why D over A/B/C**:
 
@@ -417,11 +458,11 @@ constraint precedent); ADR-003 (early-bug-catching reasoning).
 **Decision needed**: which columns get B-tree indexes, partial indexes, or composite indexes
 **Options to consider**:
 - A. Minimal — PK + FK only (PostgreSQL creates these automatically for PK; FK indexes are manual)
-- B. Retrieval-optimized — add indexes on `(doc_id, level)`, `(doc_id, sort_key)`, `is_current`, `doc_type`
+- B. Retrieval-optimized — add indexes on `(doc_id, level)`, `(doc_id, sort_key)`, `is_head`, `doc_type`
 - C. Deferred — add indexes based on measured query patterns after the retrieval pipeline is built
 **Information required to decide**:
 - Query patterns from the retrieval pipeline (not yet designed)
-- Whether partial indexes on `is_current = true` are worthwhile (Phase 1: all rows are current)
+- Whether partial indexes on `is_head = true` or `superseded_at IS NULL` are worthwhile for head-row lookup
 **Related agreement**: design principle #13 (measure first, plan second) — favors Option C
 
 ### TODO-8: ✅ RESOLVED — no JSONB on statute tables
@@ -492,8 +533,8 @@ reflects the separate-table shape. No column changes from this decision.
 
 - `parent_doc_id BIGINT NULL REFERENCES legal_documents(doc_id) ON DELETE RESTRICT`.
 - Asymmetric CHECK: `chk_legal_documents_act_no_parent CHECK (doc_type != '법률' OR parent_doc_id IS NULL)` — Acts must have NULL parents; Decrees may have NULL (graceful degradation on title-match miss, audit by query).
-- Two indexes commit ahead of TODO-7's general "measure first" deferral on use-case grounds: `ix_legal_documents_parent` (reverse traversal) and `ux_legal_documents_current_act_title` (population-rule lookup uniqueness).
-- Population rule (Phase 1): for `doc_type='대통령령'`, strip ` 시행령` from `title` and look up Act with `is_current=true`. The partial UNIQUE INDEX guarantees the lookup is unambiguous.
+- Two indexes commit ahead of TODO-7's general "measure first" deferral on use-case grounds: `ix_legal_documents_parent` (reverse traversal) and a head-row Act title partial UNIQUE (population-rule lookup uniqueness; ADR-013 replaces the old `is_current` predicate with `is_head`).
+- Population rule (Phase 1): for `doc_type='대통령령'`, strip ` 시행령` from `title` and look up Act with `is_head=true`. The partial UNIQUE INDEX guarantees the lookup is unambiguous.
 - Rules (총리령/부령) parent assignment is deferred — Korean 부령 제1조 typically delegates from both Act and Decree, so the heuristic needs cross-statute observation before ratification.
 
 **Empirical basis** (verified 2026-04-29): the 법제처 OpenAPI exposes
@@ -540,7 +581,7 @@ exercised here for the first time post-ADR-008.
 
 | Entity | Field | Agreement source |
 |--------|-------|-----------------|
-| Both | `effective_at`, `superseded_at`, `is_current` | Temporality readiness (phase-1-progress.md §5, §10) |
+| Both | `effective_at`, `superseded_at`, `is_head` | Temporality/head-version readiness (ADR-013; legal effectiveness is computed via timestamp predicates) |
 | Both | `source_url`, `content_hash` | CLAUDE.md §4 (immediate next steps) |
 | Both | `created_at`, `updated_at` | Standard audit fields (auto-apply) |
 
@@ -556,7 +597,9 @@ exercised here for the first time post-ADR-008.
 |--------|--------|
 | `supplementary_provisions` | 부칙 is structurally different from the article hierarchy (free text, different keys). Not in sketch. Confirmed by ADR-004 (TODO-9 resolved 2026-04-26) |
 | `annexes` | 별표 contains substantive provisions (penalty schedules, scope qualifiers, etc.) and must be a first-class chunk source. Inline text confirmed in API (TODO-1 resolved) |
+| `annex_attachments` | Annex HWP/PDF/image references and downloaded binary metadata. Supports annex legal content but is not itself indexed. Separates upstream provenance (`source_attachment_url`) from application-owned storage (`stored_file_path`) per ADR-014 |
 | `forms` | 서식 carries metadata + downloadable files only. Body content is ASCII box-art unsuitable for retrieval. Excluded from chunks (TODO-1 resolved) |
+| `form_attachments` | Form HWP/PDF/image references and downloaded binary metadata. Primary usable artifacts for metadata-only form rows; not chunk sources |
 
 ### Sketch fields retained as-is
 
