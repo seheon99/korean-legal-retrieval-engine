@@ -1,8 +1,8 @@
 # Korean Legal Retrieval Engine — Phase 1 Progress
 
-> **Status**: Phase-1 statute ERD frozen (ADR-010, 2026-04-29). Schema committed at `migrations/001_statute_tables.sql`. ADR-009 population rule landed and DB-verified (2026-05-03). Idempotent re-ingest landed (2026-05-03). ADR-012 keying convention accepted (2026-05-03).
+> **Status**: Phase-1 statute ERD frozen (ADR-010, 2026-04-29). Schema committed at `migrations/001_statute_tables.sql`. ADR-009 population rule landed and DB-verified (2026-05-03). Idempotent re-ingest landed (2026-05-03). ADR-012 keying convention accepted (2026-05-03). `structure_nodes` parser depth landed, ADR-012 verification triggers implemented, and the running Compose `database` service filled with 2 `legal_documents` + 240 normalized `structure_nodes` (2026-05-04).
 > **Generated**: Hand-off artifact for next session recall (now superseded by ADRs 001–012 for Phase-1 statute schema + ingestion decisions; this document remains canonical for cross-category context, license matrix, and DA log).
-> **Next session task**: `_insert_children` parser depth (now unblocked by ADR-012). `structure_nodes` first per ADR-005.
+> **Next session task**: finish the remaining statute child-table ingestion. Recommended next action: implement `annexes` insertion for the Decree's 5 appendices before `forms`, because annexes are the remaining statute-side chunk source; keep `supplementary_provisions` persisted but non-chunk-source per ADR-005.
 
 ---
 
@@ -288,17 +288,21 @@ Tasks agreed in earlier sessions (✅ done, 🔶 in progress, ⏸️ pending):
 - Document each response format and parameter set
 - → `docs/data-sources/law-go-kr-api-catalog.md`
 
-⏸️ **T3-A**: Fetch the Serious Accidents Punishment Act body via curl/Python requests
-- Confirm enforcement decree and rules are reachable too
-- → `data/raw/중대재해처벌법/`
+✅ **T3-A**: Fetch the Serious Accidents Punishment Act body via script
+- Landed as `scripts/fetch_law_samples.sh` on 2026-05-01.
+- Raw XML retained under `data/raw/{law_id}/{mst}.xml` per ADR-011.
+- Confirmed Phase-1 statute corpus is Act `228817` + Decree `277417`; no 시행규칙 exists for this statute.
 
-⏸️ **T4-A**: Analyze response structure
+✅ **T4-A**: Analyze response structure
 - Article/paragraph/item XML hierarchy
 - Whether delegation references are exposed as metadata or only in body text
 - Effective-date and amendment-history fields
-- → `docs/data-sources/중대재해처벌법-schema.md`
+- Superseded by `docs/legal-erd-draft.md`, ADRs 001–012, and the 2026-05-04 `structure_nodes` parser/tests.
 
-⏸️ **T5-A**: Verify enforcement-decree and rules linkage metadata
+✅ **T5-A**: Verify enforcement-decree and rules linkage metadata
+- ADR-009 found no explicit parent-pointer metadata in 법제처 XML.
+- Decree parent linkage is populated by title-strip lookup (`{Act title} 시행령` → Act) and DB-verified.
+- Rules linkage remains deferred until a 시행규칙-bearing statute enters scope.
 
 ⏸️ **T6-B**: Measure case-law API coverage (strengthened)
 - Counts by court level (Supreme / High / District)
@@ -321,7 +325,9 @@ Tasks agreed in earlier sessions (✅ done, 🔶 in progress, ⏸️ pending):
 ⏸️ **T10-A**: Document Phase 1 data scope
 - → `docs/phase-1-scope.md`
 
-⏸️ **T11-A**: Phase 1 raw-data dump
+🔶 **T11-A**: Phase 1 raw-data dump
+- Statute raw XML dump exists for the Act/Decree Phase-1 corpus under `data/raw/`.
+- Broader Phase-1 non-statute sources still pending.
 
 ⏸️ **T15**: Inventory Criminal Code articles cited by the commentary
 - Extract referenced articles from MoEL commentary
@@ -481,22 +487,25 @@ The shared structure of these six slips:
 
 ## 10. Next Session Starting Guide
 
-**Phase-1 statute ERD is frozen** as `migrations/001_statute_tables.sql` (ADR-010, 2026-04-29). Decision context for the Phase-1 statute schema + ingestion lives in `docs/decisions/ADR-001` through `ADR-012`. The current phase is **ingestion-pipeline implementation** (D-5 resolved; ADR-009 population rule landed and DB-verified 2026-05-03; idempotent re-ingest landed; ADR-012 keying convention accepted).
+**Phase-1 statute ERD is frozen** as `migrations/001_statute_tables.sql` (ADR-010, 2026-04-29). Decision context for the Phase-1 statute schema + ingestion lives in `docs/decisions/ADR-001` through `ADR-012`. The current phase is **ingestion-pipeline implementation**. `legal_documents` and `structure_nodes` now load end-to-end for the Phase-1 Act + Decree corpus; the running Compose `database` service is filled with 2 documents and 240 normalized `structure_nodes`.
 
 **Do immediately on next session**:
 
 1. Read `CLAUDE.md` (entry point) and the latest `docs/sessions/*.md`.
 2. Confirm scope with owner before generating output.
-3. **`_insert_children` parser depth** is now top of the queue (unblocked by ADR-012). Walk the `<조문>` block, derive `node_key` per ADR-012 §1, set `parent_id` per the level hierarchy, populate the remaining `structure_nodes` columns from XML. Then `supplementary_provisions`, `annexes`, `forms` in order. `structure_nodes` is the highest-leverage piece per ADR-005 (primary chunk source).
-4. **ADR-012 verification triggers** ship alongside `_insert_children`: (a) 조문키 shape `^[0-9]{7}$` + decoded `<조문번호>`/`<조문가지번호>`/`<조문여부>` agreement; (b) halt on any `<항가지번호>` / `<목가지번호>` / level-1..4 가지번호 element (per *법령의개정방식과폐지방식*: branches at 조 + 호 only).
+3. **Recommended next action: implement `annexes` ingestion.** The Decree has 5 appendices, annexes are the remaining statute-side chunk source per ADR-001/ADR-003, and forms are absent in the Phase-1 corpus. Parse `<별표>` / `<별표단위>` rows into `annexes`, populate attachment metadata, `image_filenames`, `content_text`, `content_hash`, and preserve `forms` as metadata-only when they appear in future corpora.
+4. **Then implement `supplementary_provisions` ingestion.** Persist 부칙 rows because the table exists and is SQL-queryable, but keep them out of chunks per ADR-005. Do not parse inner 제N조 structure until a separate decision or retrieval need appears.
 5. **ADR-006 verification trigger** still pending — fires on first ingestion of any 시행규칙-bearing statute (must verify `<법종구분>` is exactly `'총리령'` or `'부령'`, not a ministry-prefixed variant).
-6. **Amendment-tracking ADR (ADR-013 placeholder)** — decides what `_skip_if_present`'s mismatch branch should do for real amendments. Today: hard fail (`ContentMismatchError`). Future: auto-supersede pattern. Tied to TODO-5 + ADR-012 Trade-off §4 (sub-조 key fragility across amendments).
-7. Open ERD TODOs (TODO-2, TODO-5, TODO-7) ship as additive Phase-2 migrations; none blocks ingestion-pipeline work.
+6. **Heading generalization is open outside Phase-1 corpus.** The 2026-05-04 Docker smoke against all local `data/raw` showed `형법` duplicates `조문키='0001000'` for multiple `전문` heading rows. The current parser's `전문 → level 2` mapping is valid for 중대재해처벌법 Act/Decree but not yet a general statute-heading parser.
+7. **Amendment-tracking ADR (ADR-013 placeholder)** — decides what `_skip_if_present`'s mismatch branch should do for real amendments. Today: hard fail (`ContentMismatchError`). Future: auto-supersede pattern. Tied to TODO-5 + ADR-012 Trade-off §4 (sub-조 key fragility across amendments).
+8. Open ERD TODOs (TODO-2, TODO-5, TODO-7) ship as additive Phase-2 migrations; none blocks ingestion-pipeline work.
 
 **Closed dependencies** (no longer on the implement-list):
 - ADR-008 raw-API-XML retention dependency — closed by ADR-011 on 2026-05-01.
 - ADR-009 population rule — landed and DB-verified on 2026-05-03 (one Act + one Decree, parent FK populated correctly).
 - Idempotent re-ingest — landed on 2026-05-03 with `_skip_if_present` + `ContentMismatchError`.
+- `structure_nodes` parser depth — landed on 2026-05-04. Parses the `<조문>` block, materializes implicit 항 rows, derives ADR-012 `node_key` / `sort_key`, inserts parent-linked rows, normalizes `number` (`4.` → `4`, `가.` → `가`), and implements ADR-012 verification triggers.
+- Running dev DB fill — completed on 2026-05-04. Current counts: 2 `legal_documents`, 240 `structure_nodes`, 232 non-root `structure_nodes` with `parent_id`.
 
 **Phase-2 follow-up parking lot** (separate ADRs at the boundary):
 - Drop `sort_key` column per ADR-012 §Consequences — redundant with tagless `node_key` under the accepted encoding.
@@ -562,3 +571,4 @@ The shared structure of these six slips:
 - v1.0: initial artifact (compressed agreements)
 - v1.1 (2026-04-29): Phase-1 statute ERD frozen via ADR-010 (`migrations/001_statute_tables.sql`). D-1 (statute ERD scope) and D-5 (parsing-pipeline timing) marked RESOLVED. §10 Next Session Starting Guide updated to reflect ingestion-pipeline phase. ADRs 001–010 supersede this document for Phase-1 statute schema decisions; remaining sections stay canonical for cross-category context, license matrix, and DA log.
 - v1.2 (2026-05-03): ADR-009 population rule landed and DB-verified end-to-end (one Act + one Decree ingested via `python -m ingest` against pgvector/pgvector:pg16 dev stack; parent FK resolved correctly via title-strip + UNIQUE INDEX). Idempotent re-ingest landed via `_skip_if_present` + `ContentMismatchError`. ADR-012 accepted: `structure_nodes` keying convention (tagless `{조문키}-{HH}-{NN}{BB}-{KK}`) + sort_key format + branch-numbering scope (조 + 호 only per *법령의개정방식과폐지방식*) + verification triggers. §10 Next Session Starting Guide rewritten around `_insert_children` parser depth, ADR-012 verification triggers, ADR-006 verification trigger (still pending), and amendment-tracking ADR-013 (placeholder). Phase-2 follow-up parking lot recorded (drop sort_key, migration tool, packaging). ADR range supersedes this document expanded from ADRs 001–010 to ADRs 001–012.
+- v1.3 (2026-05-04): `structure_nodes` parser depth landed and filled the running Compose `database` service: 2 `legal_documents`, 240 `structure_nodes`, 232 parent-linked child rows. ADR-012 verification triggers implemented in `src/ingest/parse.py`; parser now materializes implicit 항 rows and normalizes `structure_nodes.number` (`4.` → `4`, `가.` → `가`, future branched 호 as `7의2`). §7 statute-fetch/analyze tasks refreshed to reflect the landed fetch script, raw XML retention, and DB-verified ADR-009 linkage. §10 Next Session Starting Guide updated: `structure_nodes` is closed; recommended next action is `annexes` ingestion, followed by `supplementary_provisions`, with heading generalization for broad statutes recorded as an open parser issue.
