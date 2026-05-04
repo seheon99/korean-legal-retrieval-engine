@@ -20,7 +20,7 @@ from pathlib import Path
 import psycopg
 from psycopg import Connection
 
-from .parse import discover, parse_doc
+from .parse import discover, parse_doc, parse_structure_nodes
 from .records import Document, DocType
 
 
@@ -169,15 +169,44 @@ def _insert_legal_document(
 
 
 def _insert_children(conn: Connection, doc: Document, doc_id: int) -> None:
-    """Stub for the Mermaid skeleton's `INSERT children` box.
+    """Insert parsed child rows for `doc`.
 
-    Parses and inserts:
-      - structure_nodes (편/장/절/관/조/항/호/목 → levels 1..8 per ADR-006)
-      - supplementary_provisions (부칙)
-      - annexes (별표)
-      - forms (별지서식)
-
-    Deferred — population-rule walking skeleton lands the parent-FK
-    flow first; parser depth is the next session's work.
+    Today only `structure_nodes` is implemented. 부칙/별표/서식 remain
+    intentionally out of scope for this parser pass.
     """
-    return
+    nodes = parse_structure_nodes(doc)
+    node_ids: dict[str, int] = {}
+    sql = """
+        INSERT INTO structure_nodes (
+          doc_id, parent_id, level, node_key, number, title, content,
+          sort_key, effective_date, is_changed, source_url, content_hash,
+          is_current
+        ) VALUES (
+          %(doc_id)s, %(parent_id)s, %(level)s, %(node_key)s, %(number)s,
+          %(title)s, %(content)s, %(sort_key)s, %(effective_date)s,
+          %(is_changed)s, %(source_url)s, %(content_hash)s, TRUE
+        )
+        RETURNING node_id
+    """
+    with conn.cursor() as cur:
+        for node in nodes:
+            parent_id = None
+            if node.parent_node_key is not None:
+                parent_id = node_ids.get(node.parent_node_key)
+                if parent_id is None:
+                    raise LookupError(
+                        f"Parent node_key {node.parent_node_key!r} not inserted "
+                        f"before child {node.node_key!r} ({doc.title}, mst={doc.mst})"
+                    )
+            params = node.model_dump(exclude={"parent_node_key"})
+            params["doc_id"] = doc_id
+            params["parent_id"] = parent_id
+            cur.execute(sql, params)
+            row = cur.fetchone()
+            assert row is not None
+            node_ids[node.node_key] = row[0]
+
+    logger.info(
+        "inserted %d structure_node row(s) for doc_id=%d (%s)",
+        len(nodes), doc_id, doc.title,
+    )

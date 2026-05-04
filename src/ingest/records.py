@@ -40,3 +40,21 @@ class Document(BaseModel):
 
     source_url: str
     content_hash: str
+
+
+class StructureNode(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    parent_node_key: str | None
+
+    level: int
+    node_key: str
+    number: str
+    title: str | None
+    content: str
+    sort_key: str
+    effective_date: date
+    is_changed: bool | None
+
+    source_url: str | None
+    content_hash: str
