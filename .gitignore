@@ -7,6 +7,10 @@ docs/api-samples/
 # Regenerable from law.go.kr API; not source.
 data/raw/
 
+# Downloaded annex/form binaries per ADR-016.
+# Regenerable from law.go.kr attachment URLs; not source.
+data/annexes/
+
 # Environment / secrets
 .env
 .env.local
