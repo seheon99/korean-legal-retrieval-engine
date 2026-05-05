@@ -14,7 +14,8 @@ from .records import Annex, AnnexAttachment, Document, StructureNode
 
 _VALID_DOC_TYPES = ("법률", "대통령령", "총리령", "부령")
 _ARTICLE_KEY_RE = re.compile(r"^[0-9]{7}$")
-_ANNEX_KEY_RE = re.compile(r"^[0-9]{6}[EF]$")
+# `<별표단위 별표키>` is shared: E = annex row, F = form row.
+_ANNEX_FORM_KEY_RE = re.compile(r"^[0-9]{6}[EF]$")
 _LEADING_INT_RE = re.compile(r"^(\d+)")
 _DISALLOWED_BRANCH_TAGS = ("편", "장", "절", "관", "항", "목")
 
@@ -22,7 +23,7 @@ _DISALLOWED_BRANCH_TAGS = ("편", "장", "절", "관", "항", "목")
 @dataclass(frozen=True)
 class _ParsedAnnexUnit:
     element: ET.Element
-    annex_key: str
+    unit_key: str
     kind: str
     number: str
     branch_number: str | None
@@ -242,7 +243,7 @@ def parse_annexes(doc: Document) -> list[Annex]:
         if unit.kind != "별표":
             continue
 
-        annex_key = unit.annex_key
+        annex_key = unit.unit_key
         if annex_key in seen_keys:
             raise ValueError(f"{doc.xml_path}: duplicate annex_key {annex_key!r}")
         seen_keys.add(annex_key)
@@ -278,7 +279,7 @@ def parse_annex_attachments(doc: Document) -> list[AnnexAttachment]:
             continue
 
         element = unit.element
-        annex_key = unit.annex_key
+        annex_key = unit.unit_key
         hwp_url = _text(element, "별표서식파일링크")
         hwp_filename = _text(element, "별표HWP파일명")
         if hwp_url is not None or hwp_filename is not None:
@@ -379,20 +380,20 @@ def _parse_annex_units(doc: Document) -> list[_ParsedAnnexUnit]:
     units: list[_ParsedAnnexUnit] = []
     seen_keys: set[str] = set()
     for unit in annex_root.findall("별표단위"):
-        annex_key = unit.attrib.get("별표키")
-        if not annex_key:
+        unit_key = unit.attrib.get("별표키")
+        if not unit_key:
             raise ValueError(f"{doc.xml_path}: <별표단위> missing 별표키")
-        if annex_key in seen_keys:
-            raise ValueError(f"{doc.xml_path}: duplicate annex_key {annex_key!r}")
-        seen_keys.add(annex_key)
+        if unit_key in seen_keys:
+            raise ValueError(f"{doc.xml_path}: duplicate 별표키 {unit_key!r}")
+        seen_keys.add(unit_key)
 
         kind = _required_text(unit, "별표구분", doc.xml_path)
         if kind not in ("별표", "서식"):
             raise ValueError(f"{doc.xml_path}: unsupported 별표구분 {kind!r}")
-        _assert_annex_key_shape_and_kind(annex_key, kind, doc.xml_path)
+        _assert_annex_form_key_shape_and_kind(unit_key, kind, doc.xml_path)
 
-        number, branch_number = _normalize_annex_number_fields(
-            unit, annex_key, doc.xml_path
+        number, branch_number = _normalize_annex_form_number_fields(
+            unit, unit_key, doc.xml_path
         )
         title = _required_text(unit, "별표제목", doc.xml_path)
         content_text = (
@@ -403,7 +404,7 @@ def _parse_annex_units(doc: Document) -> list[_ParsedAnnexUnit]:
         units.append(
             _ParsedAnnexUnit(
                 element=unit,
-                annex_key=annex_key,
+                unit_key=unit_key,
                 kind=kind,
                 number=number,
                 branch_number=branch_number,
@@ -415,25 +416,25 @@ def _parse_annex_units(doc: Document) -> list[_ParsedAnnexUnit]:
     return units
 
 
-def _assert_annex_key_shape_and_kind(
-    annex_key: str, kind: str, xml_path: Path
+def _assert_annex_form_key_shape_and_kind(
+    unit_key: str, kind: str, xml_path: Path
 ) -> None:
-    if _ANNEX_KEY_RE.fullmatch(annex_key) is None:
-        raise ValueError(f"{xml_path}: invalid 별표키 shape {annex_key!r}")
-    if kind == "별표" and not annex_key.endswith("E"):
+    if _ANNEX_FORM_KEY_RE.fullmatch(unit_key) is None:
+        raise ValueError(f"{xml_path}: invalid 별표키 shape {unit_key!r}")
+    if kind == "별표" and not unit_key.endswith("E"):
         raise ValueError(
             f"{xml_path}: 별표구분='별표' requires E-suffixed 별표키, got "
-            f"{annex_key!r}"
+            f"{unit_key!r}"
         )
-    if kind == "서식" and not annex_key.endswith("F"):
+    if kind == "서식" and not unit_key.endswith("F"):
         raise ValueError(
             f"{xml_path}: 별표구분='서식' requires F-suffixed 별표키, got "
-            f"{annex_key!r}"
+            f"{unit_key!r}"
         )
 
 
-def _normalize_annex_number_fields(
-    unit: ET.Element, annex_key: str, xml_path: Path
+def _normalize_annex_form_number_fields(
+    unit: ET.Element, unit_key: str, xml_path: Path
 ) -> tuple[str, str | None]:
     number = _parse_required_int(
         _required_text(unit, "별표번호", xml_path), "별표번호", xml_path
@@ -447,9 +448,9 @@ def _normalize_annex_number_fields(
             f"({number}, {branch_number})"
         )
 
-    if annex_key[:4] != f"{number:04d}" or annex_key[4:6] != f"{branch_number:02d}":
+    if unit_key[:4] != f"{number:04d}" or unit_key[4:6] != f"{branch_number:02d}":
         raise ValueError(
-            f"{xml_path}: 별표키 {annex_key!r} disagrees with XML fields "
+            f"{xml_path}: 별표키 {unit_key!r} disagrees with XML fields "
             f"(별표번호={number}, 별표가지번호={branch_number})"
         )
 
