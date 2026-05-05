@@ -166,15 +166,22 @@ Execution is staged:
 3. If separate image binaries are still needed, discover image URLs from a
    verified source such as rendered law.go.kr HTML, a documented API
    response, or another captured upstream URL.
-4. Match discovered image URLs to existing image attachment rows by
-   `source_filename` basename.
-5. Only when there is exactly one verified URL for a filename, update that
-   row's `source_attachment_url` without OC parameters, then download the
-   file and populate `stored_file_path`, `checksum_sha256`, and
-   `fetched_at`.
+4. Prefer matching discovered image URLs to existing image attachment rows
+   by `source_filename` basename.
+5. If the verified rendered law.go.kr annex content exposes image URLs
+   without filenames, order-based matching is allowed only when:
+   - the rendered annex content is fetched for one exact annex
+   - the number of rendered image URLs equals the number of image
+     attachment rows for that annex
+   - existing image rows are already in XML order (`P1`, `P2`, ...)
+   - discovered image URLs are in rendered document order
+6. Only after a URL is matched by basename or by the strict rendered-order
+   rule, update that row's `source_attachment_url` without OC parameters,
+   then download the file and populate `stored_file_path`,
+   `checksum_sha256`, and `fetched_at`.
 
-Zero matches or multiple matches halt. Guessing URL paths from image
-filename patterns is rejected.
+Zero matches, multiple matches, or count/order mismatches halt. Guessing
+URL paths from image filename patterns is rejected.
 
 If a separately verified image URL is not found in the expected law.go.kr
 rendered/download path, return to this ADR and re-evaluate the image
