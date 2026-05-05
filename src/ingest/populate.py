@@ -41,7 +41,7 @@ class ContentMismatchError(Exception):
     change that requires the (deferred) amendment-tracking flow.
 
     Fail-fast posture: silent overwrite would lose the prior version
-    without setting `superseded_at` / `is_current=FALSE`. The
+    without setting `superseded_at` / `is_head=FALSE`. The
     amendment-track decision is its own ADR (TODO-5 territory) and
     not in scope here.
     """
@@ -124,13 +124,13 @@ def _resolve_parent(conn: Connection, doc: Document) -> int | None:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT doc_id FROM legal_documents "
-                "WHERE title = %s AND doc_type = '법률' AND is_current = TRUE",
+                "WHERE title = %s AND doc_type = '법률' AND is_head = TRUE",
                 (act_title,),
             )
             row = cur.fetchone()
         if row is None:
             raise LookupError(
-                f"No current Act titled {act_title!r} for Decree "
+                f"No head Act titled {act_title!r} for Decree "
                 f"{doc.title!r}; ADR-009 Act-before-Decree ordering violated."
             )
         return row[0]
@@ -148,7 +148,7 @@ def _insert_legal_document(
           doc_type, doc_type_code, amendment_type, enacted_date,
           effective_date, competent_authority, competent_authority_code,
           structure_code, legislation_reason, source_url, content_hash,
-          is_current
+          is_head
         ) VALUES (
           %(parent_doc_id)s, %(law_id)s, %(mst)s, %(title)s,
           %(title_abbrev)s, %(law_number)s, %(doc_type)s,
@@ -192,7 +192,7 @@ def _insert_structure_nodes(conn: Connection, doc: Document, doc_id: int) -> Non
         INSERT INTO structure_nodes (
           doc_id, parent_id, level, node_key, number, title, content,
           sort_key, effective_date, is_changed, source_url, content_hash,
-          is_current
+          is_head
         ) VALUES (
           %(doc_id)s, %(parent_id)s, %(level)s, %(node_key)s, %(number)s,
           %(title)s, %(content)s, %(sort_key)s, %(effective_date)s,
@@ -230,7 +230,7 @@ def _insert_annexes(conn: Connection, doc: Document, doc_id: int) -> dict[str, i
     sql = """
         INSERT INTO annexes (
           doc_id, annex_key, number, branch_number, title, content_text,
-          content_format, source_url, content_hash, is_current
+          content_format, source_url, content_hash, is_head
         ) VALUES (
           %(doc_id)s, %(annex_key)s, %(number)s, %(branch_number)s,
           %(title)s, %(content_text)s, %(content_format)s, %(source_url)s,
