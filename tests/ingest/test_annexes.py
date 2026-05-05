@@ -38,6 +38,22 @@ def test_parse_phase_1_decree_annexes() -> None:
     assert first.content_hash == sha256_text(first.content_text)
 
 
+def test_parse_phase_1_decree_annex_content_delayouts_hard_wraps() -> None:
+    doc = parse_doc(Path("data/raw/014159/277417.xml"))
+    annexes = {annex.annex_key: annex for annex in parse_annexes(doc)}
+
+    first = annexes["000100E"].content_text
+    assert "노출되어 발생한 중추신경계장해" in first
+    assert "유기화합물에 노출되어" in first
+    assert "발생한 렙토스피라증" in first
+    assert "심부체온상승을 동반하는 열사병" in first
+
+    third = annexes["000300E"].content_text
+    assert "교량 중심선에 따라 측정한 거리를 말한다" in third
+    assert "각 본체 구간과 하나의 구조로 연결된 구간을 포함한 거리를 말한다" in third
+    assert "측정한 거\n리를 말한다" not in third
+
+
 def test_parse_phase_1_decree_annex_attachments() -> None:
     doc = parse_doc(Path("data/raw/014159/277417.xml"))
     attachments = parse_annex_attachments(doc)

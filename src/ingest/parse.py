@@ -17,7 +17,55 @@ _ARTICLE_KEY_RE = re.compile(r"^[0-9]{7}$")
 # `<별표단위 별표키>` is shared: E = annex row, F = form row.
 _ANNEX_FORM_KEY_RE = re.compile(r"^[0-9]{6}[EF]$")
 _LEADING_INT_RE = re.compile(r"^(\d+)")
+_ANNEX_NUMBERED_BLOCK_RE = re.compile(r"^\d+[.)]\s")
+_ANNEX_KOREAN_LETTER_BLOCK_RE = re.compile(r"^[가-힣]\.\s")
 _DISALLOWED_BRANCH_TAGS = ("편", "장", "절", "관", "항", "목")
+_ANNEX_TABLE_CHARS = frozenset("│┌┐└┘├┤┬┴┼─")
+_ANNEX_NO_SPACE_NEXT_PREFIXES = (
+    "하거나",
+    "한물질",
+    "한다",
+    "한 ",
+    "함한",
+    "포함",
+    "곱미터",
+    "객터미널",
+    "제곱미터",
+    "송유관",
+    "색증",
+    "단으로",
+    "되는",
+    "다.",
+    "다)",
+    "다]",
+    "토부",
+    "축물",
+    "미터",
+    "반행위",
+    "행위",
+    "호제",
+    "상인",
+    "었던",
+    "위자",
+    "인 ",
+    "른",
+    "어",
+    "의",
+    "을",
+    "를",
+    "이",
+    "가",
+    "은",
+    "는",
+    "자",
+    "증",
+    "해",
+    "리",
+    "료",
+    "적",
+    "우",
+    "위",
+)
 
 
 @dataclass(frozen=True)
@@ -365,10 +413,81 @@ def _required_normalized_annex_content(unit: ET.Element, xml_path: Path) -> str:
     el = unit.find("별표내용")
     if el is None:
         raise ValueError(f"{xml_path}: required <별표내용> missing")
-    value = _normalized_element_text(el)
+    value = _normalized_annex_content_text(el)
     if value is None:
         raise ValueError(f"{xml_path}: required <별표내용> empty after normalization")
     return value
+
+
+def _normalized_annex_content_text(el: ET.Element) -> str | None:
+    raw = "".join(el.itertext()).replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.strip() for line in raw.split("\n") if line.strip()]
+    if not lines:
+        return None
+
+    blocks = [lines[0]]
+    for next_line in lines[1:]:
+        decision = _classify_annex_line_boundary(blocks[-1], next_line)
+        if decision == "KEEP_BLOCK_BREAK":
+            blocks.append(next_line)
+        elif decision == "JOIN_NO_SPACE":
+            blocks[-1] = f"{blocks[-1]}{next_line}"
+        elif decision == "JOIN_WITH_SPACE":
+            blocks[-1] = f"{blocks[-1]} {next_line}"
+        else:
+            raise ValueError(
+                "annex content boundary requires review: "
+                f"prev={blocks[-1]!r}, next={next_line!r}"
+            )
+
+    value = "\n".join(blocks).strip()
+    return value if value else None
+
+
+def _classify_annex_line_boundary(prev_line: str, next_line: str) -> str:
+    if _is_annex_structural_boundary(prev_line, next_line):
+        return "KEEP_BLOCK_BREAK"
+    if _is_annex_no_space_join(prev_line, next_line):
+        return "JOIN_NO_SPACE"
+    return "JOIN_WITH_SPACE"
+
+
+def _is_annex_structural_boundary(prev_line: str, next_line: str) -> bool:
+    if _is_annex_header(prev_line) or _is_annex_header(next_line):
+        return True
+    if prev_line == "비고":
+        return True
+    if _is_annex_block_start(next_line):
+        return True
+    if _is_annex_table_line(prev_line) or _is_annex_table_line(next_line):
+        return True
+    return False
+
+
+def _is_annex_header(line: str) -> bool:
+    return line.startswith("■")
+
+
+def _is_annex_block_start(line: str) -> bool:
+    if line == "비고":
+        return True
+    if _ANNEX_NUMBERED_BLOCK_RE.match(line):
+        return True
+    return _ANNEX_KOREAN_LETTER_BLOCK_RE.match(line) is not None
+
+
+def _is_annex_table_line(line: str) -> bool:
+    return any(ch in line for ch in _ANNEX_TABLE_CHARS)
+
+
+def _is_annex_no_space_join(prev_line: str, next_line: str) -> bool:
+    if next_line.startswith(("ㆍ", "(", ")", "]")):
+        return True
+    if any(next_line.startswith(prefix) for prefix in _ANNEX_NO_SPACE_NEXT_PREFIXES):
+        return True
+    if prev_line[-1:].isdigit() and next_line.startswith(("미터", "제곱미터")):
+        return True
+    return False
 
 
 def _parse_annex_units(doc: Document) -> list[_ParsedAnnexUnit]:
