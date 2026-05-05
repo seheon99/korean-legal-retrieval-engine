@@ -2,8 +2,9 @@
 """Download annex attachment binaries and update annex_attachments.
 
 Stores files under data/annexes/{law_id}/{mst}/{annex_key}/{filename}
-per ADR-016. OC may be used for the outbound request, but is never
-persisted in the database.
+per ADR-016. ADR-017 makes the default retention path PDF-first with HWP
+fallback. OC may be used for the outbound request, but is never persisted
+in the database.
 """
 
 from __future__ import annotations
@@ -25,8 +26,12 @@ import psycopg
 
 
 DEFAULT_BASE_URL = "https://www.law.go.kr"
-DEFAULT_TYPES = ("hwp", "pdf")
+DEFAULT_FALLBACK_ORDER = ("pdf", "hwp")
 VALID_TYPES = ("hwp", "pdf", "image")
+
+
+class DownloadUnavailableError(RuntimeError):
+    """A source download could not produce a usable retained binary."""
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,13 @@ class AttachmentRow:
     checksum_sha256: str | None
 
 
+@dataclass
+class DownloadStats:
+    downloaded: int = 0
+    skipped: int = 0
+    selected: int = 0
+
+
 def main() -> int:
     args = _parse_args()
     dsn = args.db_url or os.environ.get("DATABASE_URL")
@@ -54,66 +66,35 @@ def main() -> int:
     law_go_kr_oc = os.environ.get("LAW_GO_KR_OC")
 
     with psycopg.connect(dsn) as conn:
-        rows = _fetch_rows(conn, args.types)
-        discovered_image_urls = _discover_missing_image_urls(
-            rows,
-            base_url=args.base_url,
-            law_go_kr_oc=law_go_kr_oc,
-        )
-        downloaded = 0
-        skipped = 0
-
-        for row in rows:
-            source_attachment_url = row.source_attachment_url
-            if source_attachment_url is None:
-                source_attachment_url = discovered_image_urls.get(row.attachment_id)
-            if source_attachment_url is None:
-                raise ValueError(
-                    f"attachment_id={row.attachment_id}: source_attachment_url "
-                    "missing and no verified discovery result exists"
-                )
-
-            target = _target_path(storage_root, row)
-            repo_relative_path = target.as_posix()
-            existing_path = (
-                Path(row.stored_file_path) if row.stored_file_path is not None else None
-            )
-
-            if existing_path is not None and row.checksum_sha256 is not None:
-                _assert_existing_file(existing_path, row.checksum_sha256, row)
-                skipped += 1
-                print(
-                    f"skip attachment_id={row.attachment_id}: "
-                    f"{existing_path.as_posix()} already matches checksum"
-                )
-                continue
-
-            request_url = _request_url(
-                source_attachment_url,
+        if args.types is None:
+            rows = _fetch_rows(conn, list(DEFAULT_FALLBACK_ORDER))
+            stats = _download_pdf_default_rows(
+                conn,
+                rows,
+                storage_root=storage_root,
                 base_url=args.base_url,
                 law_go_kr_oc=law_go_kr_oc,
             )
-            checksum = _download_to_target(request_url, target)
-            _update_row(
+        else:
+            rows = _fetch_rows(conn, args.types)
+            stats = _download_selected_rows(
                 conn,
-                row.attachment_id,
-                repo_relative_path,
-                checksum,
-                source_attachment_url=source_attachment_url,
-            )
-            downloaded += 1
-            print(
-                f"downloaded attachment_id={row.attachment_id}: "
-                f"{repo_relative_path} sha256={checksum}"
+                rows,
+                storage_root=storage_root,
+                base_url=args.base_url,
+                law_go_kr_oc=law_go_kr_oc,
             )
 
-    print(f"done: downloaded={downloaded}, skipped={skipped}, selected={len(rows)}")
+    print(
+        f"done: downloaded={stats.downloaded}, skipped={stats.skipped}, "
+        f"selected={stats.selected}"
+    )
     return 0
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Download annex attachment binaries per ADR-016."
+        description="Download annex attachment binaries per ADR-016/ADR-017."
     )
     parser.add_argument(
         "--db-url",
@@ -133,9 +114,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--types",
         nargs="+",
-        default=list(DEFAULT_TYPES),
+        default=None,
         choices=VALID_TYPES,
-        help="attachment types to download; default: hwp pdf",
+        help=(
+            "attachment types to download exactly; default is PDF-first "
+            "with HWP fallback"
+        ),
     )
     return parser.parse_args()
 
@@ -184,6 +168,190 @@ def _fetch_rows(conn: psycopg.Connection, types: list[str]) -> list[AttachmentRo
         )
         for row in rows
     ]
+
+
+def _download_selected_rows(
+    conn: psycopg.Connection,
+    rows: list[AttachmentRow],
+    *,
+    storage_root: Path,
+    base_url: str,
+    law_go_kr_oc: str | None,
+) -> DownloadStats:
+    discovered_image_urls = _discover_missing_image_urls(
+        rows,
+        base_url=base_url,
+        law_go_kr_oc=law_go_kr_oc,
+    )
+    stats = DownloadStats()
+    for row in rows:
+        stats.selected += 1
+        outcome = _download_or_skip_row(
+            conn,
+            row,
+            storage_root=storage_root,
+            base_url=base_url,
+            law_go_kr_oc=law_go_kr_oc,
+            discovered_image_urls=discovered_image_urls,
+        )
+        _record_outcome(stats, outcome)
+    return stats
+
+
+def _download_pdf_default_rows(
+    conn: psycopg.Connection,
+    rows: list[AttachmentRow],
+    *,
+    storage_root: Path,
+    base_url: str,
+    law_go_kr_oc: str | None,
+) -> DownloadStats:
+    stats = DownloadStats()
+    by_annex = _group_rows_by_annex(rows)
+
+    for annex_rows in by_annex.values():
+        pdf_rows = _rows_of_type(annex_rows, "pdf")
+        hwp_rows = _rows_of_type(annex_rows, "hwp")
+
+        if _try_retention_candidates(
+            conn,
+            pdf_rows,
+            stats,
+            storage_root=storage_root,
+            base_url=base_url,
+            law_go_kr_oc=law_go_kr_oc,
+        ):
+            continue
+
+        if _try_retention_candidates(
+            conn,
+            hwp_rows,
+            stats,
+            storage_root=storage_root,
+            base_url=base_url,
+            law_go_kr_oc=law_go_kr_oc,
+        ):
+            continue
+
+        label = _annex_label(annex_rows[0]) if annex_rows else "<unknown annex>"
+        raise ValueError(f"{label}: no PDF retained and HWP fallback unavailable")
+
+    return stats
+
+
+def _group_rows_by_annex(
+    rows: list[AttachmentRow],
+) -> dict[tuple[str, int, str], list[AttachmentRow]]:
+    by_annex: dict[tuple[str, int, str], list[AttachmentRow]] = {}
+    for row in rows:
+        by_annex.setdefault((row.law_id, row.mst, row.annex_key), []).append(row)
+    return by_annex
+
+
+def _rows_of_type(rows: list[AttachmentRow], attachment_type: str) -> list[AttachmentRow]:
+    return sorted(
+        (row for row in rows if row.attachment_type == attachment_type),
+        key=lambda row: row.attachment_id,
+    )
+
+
+def _try_retention_candidates(
+    conn: psycopg.Connection,
+    rows: list[AttachmentRow],
+    stats: DownloadStats,
+    *,
+    storage_root: Path,
+    base_url: str,
+    law_go_kr_oc: str | None,
+) -> bool:
+    for row in rows:
+        stats.selected += 1
+        try:
+            outcome = _download_or_skip_row(
+                conn,
+                row,
+                storage_root=storage_root,
+                base_url=base_url,
+                law_go_kr_oc=law_go_kr_oc,
+                discovered_image_urls={},
+            )
+        except DownloadUnavailableError as exc:
+            print(
+                f"unavailable attachment_id={row.attachment_id}: "
+                f"{row.attachment_type} candidate for {_annex_label(row)}: {exc}"
+            )
+            continue
+
+        _record_outcome(stats, outcome)
+        return True
+
+    return False
+
+
+def _download_or_skip_row(
+    conn: psycopg.Connection,
+    row: AttachmentRow,
+    *,
+    storage_root: Path,
+    base_url: str,
+    law_go_kr_oc: str | None,
+    discovered_image_urls: dict[int, str],
+) -> str:
+    source_attachment_url = row.source_attachment_url
+    if source_attachment_url is None:
+        source_attachment_url = discovered_image_urls.get(row.attachment_id)
+    if source_attachment_url is None:
+        raise DownloadUnavailableError(
+            f"attachment_id={row.attachment_id}: source_attachment_url "
+            "missing and no verified discovery result exists"
+        )
+
+    target = _target_path(storage_root, row)
+    repo_relative_path = target.as_posix()
+    existing_path = (
+        Path(row.stored_file_path) if row.stored_file_path is not None else None
+    )
+
+    if existing_path is not None and row.checksum_sha256 is not None:
+        _assert_existing_file(existing_path, row.checksum_sha256, row)
+        print(
+            f"skip attachment_id={row.attachment_id}: "
+            f"{existing_path.as_posix()} already matches checksum"
+        )
+        return "skipped"
+
+    request_url = _request_url(
+        source_attachment_url,
+        base_url=base_url,
+        law_go_kr_oc=law_go_kr_oc,
+    )
+    checksum = _download_to_target(request_url, target, row.attachment_type)
+    _update_row(
+        conn,
+        row.attachment_id,
+        repo_relative_path,
+        checksum,
+        source_attachment_url=source_attachment_url,
+    )
+    print(
+        f"downloaded attachment_id={row.attachment_id}: "
+        f"{repo_relative_path} sha256={checksum}"
+    )
+    return "downloaded"
+
+
+def _record_outcome(stats: DownloadStats, outcome: str) -> None:
+    if outcome == "downloaded":
+        stats.downloaded += 1
+        return
+    if outcome == "skipped":
+        stats.skipped += 1
+        return
+    raise ValueError(f"unexpected download outcome: {outcome}")
+
+
+def _annex_label(row: AttachmentRow) -> str:
+    return f"{row.law_id}/{row.mst}/{row.annex_key}"
 
 
 def _discover_missing_image_urls(
@@ -420,10 +588,12 @@ def _assert_existing_file(path: Path, checksum_sha256: str, row: AttachmentRow) 
             f"attachment_id={row.attachment_id}: checksum mismatch for {path}; "
             f"db={checksum_sha256}, actual={actual}"
         )
-    path.chmod(0o644)
+    _chmod_readable(path)
 
 
-def _download_to_target(request_url: str, target: Path) -> str:
+def _download_to_target(
+    request_url: str, target: Path, attachment_type: str
+) -> str:
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
         prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
@@ -439,10 +609,13 @@ def _download_to_target(request_url: str, target: Path) -> str:
                             break
                         f.write(chunk)
             except urllib.error.URLError as exc:
-                raise RuntimeError(f"download failed: {request_url}") from exc
+                raise DownloadUnavailableError(
+                    f"download failed: {request_url}"
+                ) from exc
 
         if tmp_path.stat().st_size == 0:
-            raise ValueError(f"empty download: {request_url}")
+            raise DownloadUnavailableError(f"empty download: {request_url}")
+        _assert_download_shape(tmp_path, attachment_type, request_url)
 
         checksum = _sha256_file(tmp_path)
         if target.exists():
@@ -453,15 +626,33 @@ def _download_to_target(request_url: str, target: Path) -> str:
                     f"existing={existing_checksum}, downloaded={checksum}"
                 )
             tmp_path.unlink()
-            target.chmod(0o644)
+            _chmod_readable(target)
             return checksum
 
         tmp_path.replace(target)
-        target.chmod(0o644)
+        _chmod_readable(target)
         return checksum
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
+
+
+def _assert_download_shape(
+    path: Path, attachment_type: str, request_url: str
+) -> None:
+    if attachment_type != "pdf":
+        return
+    with path.open("rb") as f:
+        header = f.read(5)
+    if header != b"%PDF-":
+        raise DownloadUnavailableError(f"invalid PDF download: {request_url}")
+
+
+def _chmod_readable(path: Path) -> None:
+    try:
+        path.chmod(0o644)
+    except PermissionError:
+        pass
 
 
 def _sha256_file(path: Path) -> str:
