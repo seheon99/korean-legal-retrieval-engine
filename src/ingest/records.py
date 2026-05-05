@@ -8,7 +8,7 @@ parser.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 DocType = Literal["법률", "대통령령", "총리령", "부령"]
+AttachmentType = Literal["hwp", "pdf", "image"]
 
 
 class Document(BaseModel):
@@ -58,3 +59,28 @@ class StructureNode(BaseModel):
 
     source_url: str | None
     content_hash: str
+
+
+class Annex(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    annex_key: str
+    number: str
+    branch_number: str | None
+    title: str
+    content_text: str
+    content_format: str | None
+    source_url: str | None
+    content_hash: str
+
+
+class AnnexAttachment(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    annex_key: str
+    attachment_type: AttachmentType
+    source_attachment_url: str | None
+    source_filename: str | None
+    stored_file_path: str | None = None
+    checksum_sha256: str | None = None
+    fetched_at: datetime | None = None

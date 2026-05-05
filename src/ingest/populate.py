@@ -5,9 +5,9 @@ Phase 2 — 대통령령: lookup parent Act via title-strip + UNIQUE INDEX.
 Phase 3 — 총리령/부령: parent_doc_id = NULL (ADR-009 patch #5
                        defers 부령 제1조 delegation parsing).
 
-Children-table inserts (structure_nodes / supplementary_provisions /
-annexes / forms) are the deferred parser depth — `_insert_children`
-is a documented stub for now.
+Children-table inserts are intentionally incremental. `structure_nodes`,
+`annexes`, and `annex_attachments` are implemented; supplementary
+provisions and forms remain deferred parser passes.
 """
 
 from __future__ import annotations
@@ -20,7 +20,13 @@ from pathlib import Path
 import psycopg
 from psycopg import Connection
 
-from .parse import discover, parse_doc, parse_structure_nodes
+from .parse import (
+    discover,
+    parse_annex_attachments,
+    parse_annexes,
+    parse_doc,
+    parse_structure_nodes,
+)
 from .records import Document, DocType
 
 
@@ -171,9 +177,15 @@ def _insert_legal_document(
 def _insert_children(conn: Connection, doc: Document, doc_id: int) -> None:
     """Insert parsed child rows for `doc`.
 
-    Today only `structure_nodes` is implemented. 부칙/별표/서식 remain
-    intentionally out of scope for this parser pass.
+    Forms remain intentionally out of scope until a form-bearing corpus
+    enters Phase-1 scope.
     """
+    _insert_structure_nodes(conn, doc, doc_id)
+    annex_ids = _insert_annexes(conn, doc, doc_id)
+    _insert_annex_attachments(conn, doc, annex_ids)
+
+
+def _insert_structure_nodes(conn: Connection, doc: Document, doc_id: int) -> None:
     nodes = parse_structure_nodes(doc)
     node_ids: dict[str, int] = {}
     sql = """
@@ -209,4 +221,66 @@ def _insert_children(conn: Connection, doc: Document, doc_id: int) -> None:
     logger.info(
         "inserted %d structure_node row(s) for doc_id=%d (%s)",
         len(nodes), doc_id, doc.title,
+    )
+
+
+def _insert_annexes(conn: Connection, doc: Document, doc_id: int) -> dict[str, int]:
+    annexes = parse_annexes(doc)
+    annex_ids: dict[str, int] = {}
+    sql = """
+        INSERT INTO annexes (
+          doc_id, annex_key, number, branch_number, title, content_text,
+          content_format, source_url, content_hash, is_current
+        ) VALUES (
+          %(doc_id)s, %(annex_key)s, %(number)s, %(branch_number)s,
+          %(title)s, %(content_text)s, %(content_format)s, %(source_url)s,
+          %(content_hash)s, TRUE
+        )
+        RETURNING annex_id
+    """
+    with conn.cursor() as cur:
+        for annex in annexes:
+            params = annex.model_dump()
+            params["doc_id"] = doc_id
+            cur.execute(sql, params)
+            row = cur.fetchone()
+            assert row is not None
+            annex_ids[annex.annex_key] = row[0]
+
+    logger.info(
+        "inserted %d annex row(s) for doc_id=%d (%s)",
+        len(annexes), doc_id, doc.title,
+    )
+    return annex_ids
+
+
+def _insert_annex_attachments(
+    conn: Connection, doc: Document, annex_ids: dict[str, int]
+) -> None:
+    attachments = parse_annex_attachments(doc)
+    sql = """
+        INSERT INTO annex_attachments (
+          annex_id, attachment_type, source_attachment_url, source_filename,
+          stored_file_path, checksum_sha256, fetched_at
+        ) VALUES (
+          %(annex_id)s, %(attachment_type)s, %(source_attachment_url)s,
+          %(source_filename)s, %(stored_file_path)s, %(checksum_sha256)s,
+          %(fetched_at)s
+        )
+    """
+    with conn.cursor() as cur:
+        for attachment in attachments:
+            annex_id = annex_ids.get(attachment.annex_key)
+            if annex_id is None:
+                raise LookupError(
+                    f"Annex {attachment.annex_key!r} not inserted before "
+                    f"attachment ({doc.title}, mst={doc.mst})"
+                )
+            params = attachment.model_dump(exclude={"annex_key"})
+            params["annex_id"] = annex_id
+            cur.execute(sql, params)
+
+    logger.info(
+        "inserted %d annex_attachment row(s) for %s",
+        len(attachments), doc.title,
     )

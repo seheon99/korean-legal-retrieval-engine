@@ -5,16 +5,29 @@ from __future__ import annotations
 import hashlib
 import re
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
-from .records import Document, StructureNode
+from .records import Annex, AnnexAttachment, Document, StructureNode
 
 
 _VALID_DOC_TYPES = ("법률", "대통령령", "총리령", "부령")
 _ARTICLE_KEY_RE = re.compile(r"^[0-9]{7}$")
+_ANNEX_KEY_RE = re.compile(r"^[0-9]{6}[EF]$")
 _LEADING_INT_RE = re.compile(r"^(\d+)")
 _DISALLOWED_BRANCH_TAGS = ("편", "장", "절", "관", "항", "목")
+
+
+@dataclass(frozen=True)
+class _ParsedAnnexUnit:
+    element: ET.Element
+    annex_key: str
+    kind: str
+    number: str
+    branch_number: str | None
+    title: str
+    content_text: str | None
 
 
 def discover(raw_dir: Path) -> list[Path]:
@@ -220,6 +233,95 @@ def parse_structure_nodes(doc: Document) -> list[StructureNode]:
     return nodes
 
 
+def parse_annexes(doc: Document) -> list[Annex]:
+    """Parse `<별표구분>별표</별표구분>` rows into `annexes` records."""
+    annexes: list[Annex] = []
+    seen_keys: set[str] = set()
+
+    for unit in _parse_annex_units(doc):
+        if unit.kind != "별표":
+            continue
+
+        annex_key = unit.annex_key
+        if annex_key in seen_keys:
+            raise ValueError(f"{doc.xml_path}: duplicate annex_key {annex_key!r}")
+        seen_keys.add(annex_key)
+
+        if unit.content_text is None:
+            raise ValueError(f"{doc.xml_path}: annex content missing for {annex_key}")
+        annexes.append(
+            Annex(
+                annex_key=annex_key,
+                number=unit.number,
+                branch_number=unit.branch_number,
+                title=unit.title,
+                content_text=unit.content_text,
+                content_format=None,
+                source_url=None,
+                content_hash=sha256_text(unit.content_text),
+            )
+        )
+
+    return annexes
+
+
+def parse_annex_attachments(doc: Document) -> list[AnnexAttachment]:
+    """Parse source attachment references for annex rows only.
+
+    Form rows are validated by `_parse_annex_units()` but remain reserved
+    for a later `forms` parser.
+    """
+    attachments: list[AnnexAttachment] = []
+
+    for unit in _parse_annex_units(doc):
+        if unit.kind != "별표":
+            continue
+
+        element = unit.element
+        annex_key = unit.annex_key
+        hwp_url = _text(element, "별표서식파일링크")
+        hwp_filename = _text(element, "별표HWP파일명")
+        if hwp_url is not None or hwp_filename is not None:
+            attachments.append(
+                AnnexAttachment(
+                    annex_key=annex_key,
+                    attachment_type="hwp",
+                    source_attachment_url=hwp_url,
+                    source_filename=hwp_filename,
+                )
+            )
+
+        pdf_url = _text(element, "별표서식PDF파일링크")
+        pdf_filename = _text(element, "별표PDF파일명")
+        if pdf_url is not None or pdf_filename is not None:
+            attachments.append(
+                AnnexAttachment(
+                    annex_key=annex_key,
+                    attachment_type="pdf",
+                    source_attachment_url=pdf_url,
+                    source_filename=pdf_filename,
+                )
+            )
+
+        for image_el in element.findall("별표이미지파일명"):
+            filename = _element_text(image_el)
+            if filename is None:
+                raise ValueError(
+                    f"{doc.xml_path}: empty <별표이미지파일명> for "
+                    f"annex_key={annex_key}"
+                )
+            attachments.append(
+                AnnexAttachment(
+                    annex_key=annex_key,
+                    attachment_type="image",
+                    source_attachment_url=None,
+                    source_filename=filename,
+                )
+            )
+
+    return attachments
+
+
 def sha256_file(path: Path) -> str:
     """SHA-256 hex of the file — the ADR-011 integrity link to
     `legal_documents.content_hash`."""
@@ -238,6 +340,10 @@ def _text(parent: ET.Element, tag: str) -> str | None:
     el = parent.find(tag)
     if el is None:
         return None
+    return _element_text(el)
+
+
+def _element_text(el: ET.Element) -> str | None:
     value = "".join(el.itertext()).strip()
     return value if value else None
 
@@ -247,6 +353,107 @@ def _required_text(parent: ET.Element, tag: str, xml_path: Path) -> str:
     if value is None:
         raise ValueError(f"{xml_path}: required <{tag}> missing or empty")
     return value
+
+
+def _normalized_element_text(el: ET.Element) -> str | None:
+    value = "".join(el.itertext()).replace("\r\n", "\n").replace("\r", "\n").strip()
+    return value if value else None
+
+
+def _required_normalized_annex_content(unit: ET.Element, xml_path: Path) -> str:
+    el = unit.find("별표내용")
+    if el is None:
+        raise ValueError(f"{xml_path}: required <별표내용> missing")
+    value = _normalized_element_text(el)
+    if value is None:
+        raise ValueError(f"{xml_path}: required <별표내용> empty after normalization")
+    return value
+
+
+def _parse_annex_units(doc: Document) -> list[_ParsedAnnexUnit]:
+    root = ET.parse(doc.xml_path).getroot()
+    annex_root = root.find("별표")
+    if annex_root is None:
+        return []
+
+    units: list[_ParsedAnnexUnit] = []
+    seen_keys: set[str] = set()
+    for unit in annex_root.findall("별표단위"):
+        annex_key = unit.attrib.get("별표키")
+        if not annex_key:
+            raise ValueError(f"{doc.xml_path}: <별표단위> missing 별표키")
+        if annex_key in seen_keys:
+            raise ValueError(f"{doc.xml_path}: duplicate annex_key {annex_key!r}")
+        seen_keys.add(annex_key)
+
+        kind = _required_text(unit, "별표구분", doc.xml_path)
+        if kind not in ("별표", "서식"):
+            raise ValueError(f"{doc.xml_path}: unsupported 별표구분 {kind!r}")
+        _assert_annex_key_shape_and_kind(annex_key, kind, doc.xml_path)
+
+        number, branch_number = _normalize_annex_number_fields(
+            unit, annex_key, doc.xml_path
+        )
+        title = _required_text(unit, "별표제목", doc.xml_path)
+        content_text = (
+            _required_normalized_annex_content(unit, doc.xml_path)
+            if kind == "별표"
+            else None
+        )
+        units.append(
+            _ParsedAnnexUnit(
+                element=unit,
+                annex_key=annex_key,
+                kind=kind,
+                number=number,
+                branch_number=branch_number,
+                title=title,
+                content_text=content_text,
+            )
+        )
+
+    return units
+
+
+def _assert_annex_key_shape_and_kind(
+    annex_key: str, kind: str, xml_path: Path
+) -> None:
+    if _ANNEX_KEY_RE.fullmatch(annex_key) is None:
+        raise ValueError(f"{xml_path}: invalid 별표키 shape {annex_key!r}")
+    if kind == "별표" and not annex_key.endswith("E"):
+        raise ValueError(
+            f"{xml_path}: 별표구분='별표' requires E-suffixed 별표키, got "
+            f"{annex_key!r}"
+        )
+    if kind == "서식" and not annex_key.endswith("F"):
+        raise ValueError(
+            f"{xml_path}: 별표구분='서식' requires F-suffixed 별표키, got "
+            f"{annex_key!r}"
+        )
+
+
+def _normalize_annex_number_fields(
+    unit: ET.Element, annex_key: str, xml_path: Path
+) -> tuple[str, str | None]:
+    number = _parse_required_int(
+        _required_text(unit, "별표번호", xml_path), "별표번호", xml_path
+    )
+    branch_number = _parse_optional_int(
+        _text(unit, "별표가지번호"), "별표가지번호", xml_path
+    )
+    if number > 9999 or branch_number > 99:
+        raise ValueError(
+            f"{xml_path}: 별표번호/별표가지번호 exceeds key segment width "
+            f"({number}, {branch_number})"
+        )
+
+    if annex_key[:4] != f"{number:04d}" or annex_key[4:6] != f"{branch_number:02d}":
+        raise ValueError(
+            f"{xml_path}: 별표키 {annex_key!r} disagrees with XML fields "
+            f"(별표번호={number}, 별표가지번호={branch_number})"
+        )
+
+    return str(number), None if branch_number == 0 else str(branch_number)
 
 
 def _date_text(parent: ET.Element, tag: str, xml_path: Path) -> date:
