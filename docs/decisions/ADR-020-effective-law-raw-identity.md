@@ -1,6 +1,6 @@
 # ADR-020 — `eflaw` is the canonical statute XML source
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-05-06
 - **Context layer**: Statute raw retention, amendment tracking, OSH ingestion
 - **Amends**:
