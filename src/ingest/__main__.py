@@ -23,7 +23,7 @@ def main() -> None:
         "--raw-dir",
         type=Path,
         default=Path("data/raw"),
-        help="root of the data/raw/{law_id}/{mst}.xml store",
+        help="root of the canonical data/raw/eflaw/{law_id}/{mst}/{efYd}.xml store",
     )
     parser.add_argument(
         "--db-url",

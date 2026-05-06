@@ -37,9 +37,9 @@ registered with an IP-whitelisted endpoint.
 
 Two local-only directories hold 법제처 API responses, both gitignored:
 
-- `data/raw/{law_id}/{mst}.xml` — canonical retention store for full
-  document responses (`lawService.do`) per
-  [ADR-011](docs/decisions/ADR-011-raw-api-xml-retention.md).
+- `data/raw/eflaw/{law_id}/{mst}/{efYd}.xml` — canonical retention store
+  for effective-date-specific statute XML (`lawService.do?target=eflaw`)
+  per [ADR-020](docs/decisions/ADR-020-effective-law-raw-identity.md).
   Indefinite retention; integrity link via `legal_documents.content_hash`.
 - `docs/api-samples/` — developer-facing samples for ADR drafting and
   ad-hoc inspection. Search responses (`lawSearch.do`) write here.
@@ -58,7 +58,7 @@ To populate both stores on a fresh clone:
 ```bash
 ./scripts/fetch_law_samples.sh                  # Phase-1 default set
 ./scripts/fetch_law_samples.sh --force          # overwrite existing
-./scripts/fetch_law_samples.sh --doc 013993 228817   # single document
+./scripts/fetch_law_samples.sh --eflaw 013993 228817 20220127
 ./scripts/fetch_law_samples.sh --search 중대재해      # single search
 ./scripts/fetch_law_samples.sh --help
 ```
@@ -68,8 +68,8 @@ writes atomically (tmp + rename) to avoid half-written files on crash.
 
 Path conventions:
 
-- Documents: `data/raw/{law_id}/{mst}.xml` (e.g.
-  `data/raw/013993/228817.xml` for the Act).
+- Documents: `data/raw/eflaw/{law_id}/{mst}/{efYd}.xml` (e.g.
+  `data/raw/eflaw/013993/228817/20220127.xml` for the Act).
 - Searches: `docs/api-samples/search-{query}.xml` (e.g.
   `docs/api-samples/search-중대재해.xml`).
 

@@ -37,13 +37,10 @@ DECREE_SUFFIX = " 시행령"
 
 
 class ContentMismatchError(Exception):
-    """Same MST exists with a different `content_hash` — substantive
-    change that requires the (deferred) amendment-tracking flow.
+    """Same canonical source identity exists with a different `content_hash`.
 
-    Fail-fast posture: silent overwrite would lose the prior version
-    without setting `superseded_at` / `is_head=FALSE`. The
-    amendment-track decision is its own ADR (TODO-5 territory) and
-    not in scope here.
+    ADR-020 identity is `(law_id, mst, effective_date)`. A mismatch for
+    that identity is source drift or local corruption, not an amendment.
     """
 
 
@@ -80,17 +77,17 @@ def run(raw_dir: Path, *, dsn: str | None = None) -> None:
 
 
 def _skip_if_present(conn: Connection, doc: Document) -> bool:
-    """Idempotent re-ingest: True if a row with `doc.mst` already
-    exists and its `content_hash` matches; raise on mismatch.
+    """Idempotent re-ingest for ADR-020 source-row identity.
 
     Match → no-op (don't INSERT, don't recurse into children).
-    Mismatch → ContentMismatchError (substantive change; out of scope).
+    Mismatch → ContentMismatchError.
     Absent → False (caller proceeds with INSERT).
     """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT doc_id, content_hash FROM legal_documents WHERE mst = %s",
-            (doc.mst,),
+            "SELECT doc_id, content_hash FROM legal_documents "
+            "WHERE law_id = %s AND mst = %s AND effective_date = %s",
+            (doc.law_id, doc.mst, doc.effective_date),
         )
         row = cur.fetchone()
     if row is None:
@@ -98,14 +95,16 @@ def _skip_if_present(conn: Connection, doc: Document) -> bool:
     existing_id, existing_hash = row
     if existing_hash == doc.content_hash:
         logger.info(
-            "skip mst=%d (%s, doc_id=%d) — content_hash match",
-            doc.mst, doc.title, existing_id,
+            "skip law_id=%s mst=%d effective_date=%s (%s, doc_id=%d) — "
+            "content_hash match",
+            doc.law_id, doc.mst, doc.effective_date, doc.title, existing_id,
         )
         return True
     raise ContentMismatchError(
-        f"mst={doc.mst} ({doc.title!r}) exists with different content_hash; "
+        f"law_id={doc.law_id} mst={doc.mst} effective_date={doc.effective_date} "
+        f"({doc.title!r}) exists with different content_hash; "
         f"existing={existing_hash[:12]}…, incoming={doc.content_hash[:12]}…. "
-        f"Substantive change — amendment tracking is deferred (TODO-5)."
+        f"ADR-020 source identity mismatch."
     )
 
 

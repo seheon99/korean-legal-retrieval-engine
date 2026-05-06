@@ -80,14 +80,30 @@ class _ParsedAnnexUnit:
 
 
 def discover(raw_dir: Path) -> list[Path]:
-    """Return XML paths under `data/raw/{law_id}/{mst}.xml` (ADR-011)."""
-    return sorted(raw_dir.glob("*/*.xml"))
+    """Return canonical raw XML paths under `data/raw`.
+
+    ADR-020 makes `target=eflaw` the canonical statute XML source. Legacy
+    `data/raw/{law_id}/{mst}.xml` files are still parseable when passed
+    directly, but broad discovery intentionally ignores them.
+    """
+    return sorted((raw_dir / "eflaw").glob("*/*/*.xml"))
 
 
 def parse_doc(xml_path: Path) -> Document:
     """Extract doc-level fields from one raw XML file."""
     mst = int(xml_path.stem)
     law_id = xml_path.parent.name
+    source_target = "law"
+    source_efyd: str | None = None
+    if (
+        len(xml_path.parts) >= 4
+        and xml_path.parts[-4] == "eflaw"
+        and xml_path.stem.isdigit()
+    ):
+        source_target = "eflaw"
+        source_efyd = xml_path.stem
+        mst = int(xml_path.parent.name)
+        law_id = xml_path.parent.parent.name
 
     info = ET.parse(xml_path).getroot().find("기본정보")
     if info is None:
@@ -125,6 +141,13 @@ def parse_doc(xml_path: Path) -> Document:
     if not auth_code:
         raise ValueError(f"{xml_path}: <소관부처> missing 소관부처코드 attribute")
 
+    effective_date = yyyymmdd("시행일자")
+    if source_efyd is not None and effective_date.strftime("%Y%m%d") != source_efyd:
+        raise ValueError(
+            f"{xml_path}: path efYd {source_efyd!r} disagrees with "
+            f"<시행일자> {effective_date:%Y%m%d}; ADR-020 identity violation."
+        )
+
     return Document(
         law_id=law_id,
         mst=mst,
@@ -136,17 +159,21 @@ def parse_doc(xml_path: Path) -> Document:
         doc_type_code=doc_type_el.attrib.get("법종구분코드"),
         amendment_type=required("제개정구분"),
         enacted_date=yyyymmdd("공포일자"),
-        effective_date=yyyymmdd("시행일자"),
+        effective_date=effective_date,
         competent_authority=auth_el.text.strip(),
         competent_authority_code=auth_code,
         structure_code=text("편장절관"),
         legislation_reason=None,
-        source_url=(
-            f"https://www.law.go.kr/DRF/lawService.do"
-            f"?target=law&MST={mst}&type=XML"
-        ),
+        source_url=_source_url(source_target, mst, source_efyd),
         content_hash=sha256_file(xml_path),
     )
+
+
+def _source_url(target: str, mst: int, efyd: str | None) -> str:
+    base = f"https://www.law.go.kr/DRF/lawService.do?target={target}&MST={mst}"
+    if efyd is not None:
+        base += f"&efYd={efyd}"
+    return f"{base}&type=XML"
 
 
 def parse_structure_nodes(doc: Document) -> list[StructureNode]:
