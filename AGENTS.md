@@ -63,7 +63,7 @@ Phase-1 schema (per ADRs 001–019):
 - `image_filenames TEXT[]` on `annexes` and `forms` (ADR-010 sub-decision; closes ADR-008 "Out of scope" #2).
 - `structure_nodes.node_key` / `sort_key` population rules per ADR-012 (2026-05-03): tagless ASCII format `{조문키}-{HH}-{NN}{BB}-{KK}` with ordinal at 항/목, parsed `<호번호>`+`<호가지번호>` at 호. Branch numbering scope per *법령의개정방식과폐지방식* — 조 and 호 only; verification trigger halts on any branch element at 편/장/절/관/항/목. **Phase-2 follow-up**: drop `sort_key` column (redundant with tagless `node_key`).
 
-Open ERD TODOs (TODO-2, TODO-5, TODO-7) all ship as additive Phase-2 migrations; none blocks the freeze. Current phase is **ADR-019 OSH API discovery before code changes**: SAPA Act + Decree source ingestion is DB-verified; OSH Act/Decree/Rule exact API records are not yet fetched. Next step is law.go.kr `lawSearch.do` / `lawService.do` discovery for `target=law` and `target=eflaw`, including the raw-retention identity check for `(law_id, mst, efYd)`.
+Open ERD TODOs (TODO-2, TODO-5, TODO-7) all ship as additive Phase-2 migrations; none blocks the freeze. Current phase is **ADR-020 review before OSH writes**: OSH API discovery proved `target=eflaw` returns distinct XML for the same `(law_id, mst)` at different `efYd` values. ADR-020 is drafted with status `Proposed`; do not write OSH raw files, migrations, parser changes, or ingestion rows until Seheon accepts the effective-date raw identity rule.
 
 ---
 
@@ -180,4 +180,4 @@ legal-retrieval/
 
 ---
 
-*Last updated: 2026-05-06 (after ADR-019). Update on each ADR commit.*
+*Last updated: 2026-05-06 (after ADR-020 draft). Update on each ADR commit.*
