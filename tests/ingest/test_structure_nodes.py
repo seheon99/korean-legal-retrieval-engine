@@ -35,7 +35,7 @@ def test_adr_012_key_composition() -> None:
 
 
 def test_parse_phase_1_act_structure_nodes() -> None:
-    nodes = _sample_nodes("data/raw/013993/228817.xml")
+    nodes = _sample_nodes("data/raw/eflaw/013993/228817/20220127.xml")
 
     assert len(nodes) == 102
     assert nodes[0].level == 2
@@ -54,7 +54,7 @@ def test_parse_phase_1_act_structure_nodes() -> None:
 
 
 def test_parse_phase_1_decree_structure_nodes() -> None:
-    nodes = _sample_nodes("data/raw/014159/277417.xml")
+    nodes = _sample_nodes("data/raw/eflaw/014159/277417/20251001.xml")
 
     assert len(nodes) == 138
     by_key = {node.node_key: node for node in nodes}

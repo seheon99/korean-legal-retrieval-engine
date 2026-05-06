@@ -241,12 +241,23 @@ that creates the table.
 
    **Inferred-value verification trigger** (acceptance refinement,
    2026-04-28): the first ingestion of any statute that carries a
-   시행규칙 must verify that `<법종구분>` resolves to exactly
-   `'총리령'` or `'부령'` — **not** a ministry-prefixed variant such
-   as `'행정안전부령'`. If the observed value diverges from the
-   inferred set, the CHECK value set in this ADR is revisited
-   (likely toward broadening the set or capturing the ministry
-   prefix as a separate column).
+   시행규칙 must verify how `<법종구분>` maps to the canonical DB
+   values `'총리령'` or `'부령'`, including any ministry-prefixed
+   variant such as `'행정안전부령'`. If the observed value cannot be
+   normalized into the ADR-006 set, the CHECK value set in this ADR
+   is revisited.
+
+   **Verification result (2026-05-07):** OSH 시행규칙 returned
+   `<법종구분>고용노동부령</법종구분>`. This does not invalidate the
+   ADR-006 DB value set. 법제처's own explanation states that
+   `대통령령` corresponds to `시행령`, and `총리령ㆍ부령` correspond to
+   `시행규칙`. Therefore the parser normalizes ministry-prefixed `*부령`
+   values to canonical DB `doc_type='부령'`. The original API value
+   remains in retained raw XML, and `doc_type_code` remains captured per
+   ADR-007.
+
+   Reference:
+   `https://www.law.go.kr/LSW/cgmExpcInfoP.do?cgmExpcDatSeq=427740&mode=2&ofiClsCd=350122`
 
 ## What is checked vs. what is still open
 

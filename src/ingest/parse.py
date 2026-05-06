@@ -13,6 +13,7 @@ from .records import Annex, AnnexAttachment, Document, StructureNode
 
 
 _VALID_DOC_TYPES = ("법률", "대통령령", "총리령", "부령")
+_MINISTRY_RULE_RE = re.compile(r"^[가-힣]+부령$")
 _ARTICLE_KEY_RE = re.compile(r"^[0-9]{7}$")
 # `<별표단위 별표키>` is shared: E = annex row, F = form row.
 _ANNEX_FORM_KEY_RE = re.compile(r"^[0-9]{6}[EF]$")
@@ -126,13 +127,7 @@ def parse_doc(xml_path: Path) -> Document:
     if doc_type_el is None or doc_type_el.text is None:
         raise ValueError(f"{xml_path}: <법종구분> missing")
     doc_type_text = doc_type_el.text.strip()
-    if doc_type_text not in _VALID_DOC_TYPES:
-        # ADR-006 verification trigger candidate (e.g., 행정안전부령).
-        # Per-ministry shape handling lives in a follow-up; fail fast.
-        raise ValueError(
-            f"{xml_path}: unsupported doc_type {doc_type_text!r}; "
-            f"ADR-006 verification trigger required."
-        )
+    doc_type = _normalize_doc_type(doc_type_text, xml_path)
 
     auth_el = info.find("소관부처")
     if auth_el is None or auth_el.text is None:
@@ -155,7 +150,7 @@ def parse_doc(xml_path: Path) -> Document:
         title=required("법령명_한글"),
         title_abbrev=text("법령명약칭"),
         law_number=required("공포번호"),
-        doc_type=doc_type_text,  # type: ignore[arg-type]
+        doc_type=doc_type,  # type: ignore[arg-type]
         doc_type_code=doc_type_el.attrib.get("법종구분코드"),
         amendment_type=required("제개정구분"),
         enacted_date=yyyymmdd("공포일자"),
@@ -174,6 +169,17 @@ def _source_url(target: str, mst: int, efyd: str | None) -> str:
     if efyd is not None:
         base += f"&efYd={efyd}"
     return f"{base}&type=XML"
+
+
+def _normalize_doc_type(doc_type_text: str, xml_path: Path) -> str:
+    if doc_type_text in _VALID_DOC_TYPES:
+        return doc_type_text
+    if _MINISTRY_RULE_RE.match(doc_type_text):
+        return "부령"
+    raise ValueError(
+        f"{xml_path}: unsupported doc_type {doc_type_text!r}; "
+        f"ADR-006 verification trigger required."
+    )
 
 
 def parse_structure_nodes(doc: Document) -> list[StructureNode]:

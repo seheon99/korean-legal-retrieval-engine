@@ -8,14 +8,14 @@ from ingest.records import Document
 
 
 def test_parse_phase_1_act_has_no_annexes() -> None:
-    doc = parse_doc(Path("data/raw/013993/228817.xml"))
+    doc = parse_doc(Path("data/raw/eflaw/013993/228817/20220127.xml"))
 
     assert parse_annexes(doc) == []
     assert parse_annex_attachments(doc) == []
 
 
 def test_parse_phase_1_decree_annexes() -> None:
-    doc = parse_doc(Path("data/raw/014159/277417.xml"))
+    doc = parse_doc(Path("data/raw/eflaw/014159/277417/20251001.xml"))
     annexes = parse_annexes(doc)
 
     assert [annex.annex_key for annex in annexes] == [
@@ -39,7 +39,7 @@ def test_parse_phase_1_decree_annexes() -> None:
 
 
 def test_parse_phase_1_decree_annex_content_delayouts_hard_wraps() -> None:
-    doc = parse_doc(Path("data/raw/014159/277417.xml"))
+    doc = parse_doc(Path("data/raw/eflaw/014159/277417/20251001.xml"))
     annexes = {annex.annex_key: annex for annex in parse_annexes(doc)}
 
     first = annexes["000100E"].content_text
@@ -55,7 +55,7 @@ def test_parse_phase_1_decree_annex_content_delayouts_hard_wraps() -> None:
 
 
 def test_parse_phase_1_decree_annex_attachments() -> None:
-    doc = parse_doc(Path("data/raw/014159/277417.xml"))
+    doc = parse_doc(Path("data/raw/eflaw/014159/277417/20251001.xml"))
     attachments = parse_annex_attachments(doc)
 
     assert len(attachments) == 21
@@ -66,8 +66,8 @@ def test_parse_phase_1_decree_annex_attachments() -> None:
     first_hwp = attachments[0]
     assert first_hwp.annex_key == "000100E"
     assert first_hwp.attachment_type == "hwp"
-    assert first_hwp.source_attachment_url == "/LSW/flDownload.do?flSeq=157760669"
-    assert first_hwp.source_filename == "law0141592025100135805KC_000100E.hwp"
+    assert first_hwp.source_attachment_url == "/LSW/flDownload.do?flSeq=157760599"
+    assert first_hwp.source_filename == "law0141592025100135805KC_000100E_20251001.hwp"
     assert first_hwp.stored_file_path is None
     assert first_hwp.checksum_sha256 is None
     assert first_hwp.fetched_at is None
@@ -77,7 +77,10 @@ def test_parse_phase_1_decree_annex_attachments() -> None:
         for a in attachments
         if a.annex_key == "000100E" and a.attachment_type == "image"
     ]
-    assert first_images == ["000100110201_P1.gif", "000100110201_P2.gif"]
+    assert first_images == [
+        "000100110201_P1_20251001.gif",
+        "000100110201_P2_20251001.gif",
+    ]
     assert all(
         a.source_attachment_url is None
         for a in attachments
