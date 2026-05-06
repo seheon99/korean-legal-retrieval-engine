@@ -54,18 +54,18 @@ Scope remains intentionally narrow inside 성문규범:
 
 **Hard rule**: API response sample comes before schema design. We do not own the data — 법제처 does. Drawing the ERD before seeing the actual XML guarantees a rewrite.
 
-Phase-1 schema (per ADRs 001–019):
+Phase-1 schema (per ADRs 001–020):
 
 - Five source tables: `legal_documents`, `structure_nodes`, `supplementary_provisions`, `annexes`, `forms` (ADR-002, ADR-004).
 - `chunks` is the unified search index (separate migration, ships with retrieval-pipeline design). Phase-1 source FK columns are closed at two: `structure_node_id`, `annex_id` (ADR-003, ADR-005). `supplementary_provisions` is persistence-only, not a chunk source.
 - `doc_type` (TEXT + CHECK over {법률, 대통령령, 총리령, 부령}) and `level` (SMALLINT + CHECK over 1..8 → 편→장→절→관→조→항→호→목) per ADR-006. `doc_type_code TEXT NULL` sibling column captures `법종구분코드` for provenance (ADR-007).
 - No JSONB `metadata` column on either `legal_documents` or `structure_nodes` (ADR-008). Forward policy: promote when needed, omit deliberately, retain raw API XML as the canonical fallback. `chunks.metadata` JSONB is unaffected (separate role).
-- Raw API XML retention committed via ADR-011: filesystem store at `data/raw/{law_id}/{mst}.xml`, indefinite retention, plain UTF-8, gitignored. Integrity link: SHA-256 of file = `legal_documents.content_hash`. Closes ADR-008's soft retention dependency.
+- Raw API XML retention committed via ADR-011 and revised by ADR-020: canonical filesystem store is `data/raw/eflaw/{law_id}/{mst}/{efYd}.xml`, indefinite retention, plain UTF-8, gitignored. Integrity link: SHA-256 of file = `legal_documents.content_hash`. Closes ADR-008's soft retention dependency.
 - `parent_doc_id` self-FK on `legal_documents` for Act↔Decree linkage (ADR-009, amended by ADR-013). Asymmetric CHECK enforces "Acts have NULL parents"; a partial UNIQUE INDEX on `(title) WHERE doc_type='법률' AND is_head=true` backs the population-rule lookup; reverse-traversal index on `(parent_doc_id) WHERE parent_doc_id IS NOT NULL`. OSH 시행규칙 now makes Rule-parent assignment live verification work.
 - `image_filenames TEXT[]` on `annexes` and `forms` (ADR-010 sub-decision; closes ADR-008 "Out of scope" #2).
-- `structure_nodes.node_key` / `sort_key` population rules per ADR-012 (2026-05-03): tagless ASCII format `{조문키}-{HH}-{NN}{BB}-{KK}` with ordinal at 항/목, parsed `<호번호>`+`<호가지번호>` at 호. Branch numbering scope per _법령의개정방식과폐지방식_ — 조 and 호 only; verification trigger halts on any branch element at 편/장/절/관/항/목. **Phase-2 follow-up**: drop `sort_key` column (redundant with tagless `node_key`).
+- `structure_nodes.node_key` / `sort_key` population rules per ADR-012 (2026-05-03): tagless ASCII format `{조문키}-{HH}-{NN}{BB}-{KK}` with ordinal at 항/목, parsed `<호번호>`+`<호가지번호>` at 호. OSH verifies inline branched `<호번호>` values such as `3의2.` must also normalize into the 호 branch segment when `<호가지번호>` is absent. Branch numbering scope per _법령의개정방식과폐지방식_ — 조 and 호 only; verification trigger halts on any branch element at 편/장/절/관/항/목. **Phase-2 follow-up**: drop `sort_key` column (redundant with tagless `node_key`).
 
-Open ERD TODOs (TODO-2, TODO-5, TODO-7) all ship as additive Phase-2 migrations; none blocks the freeze. Current phase is **canonical `eflaw` ingestion rollout**: ADR-020 accepted `target=eflaw` as canonical, `target=law` auxiliary only, `data/raw/eflaw/{law_id}/{mst}/{efYd}.xml` as the canonical raw path, and `(law_id, mst, effective_date)` as source-row identity. Migration `004`, canonical SAPA/OSH `eflaw` fetches, parser discovery/source-url support, and SAPA clean-DB ingest are verified. Parser normalizes ministry-prefixed Rule values such as `고용노동부령` to canonical DB `부령`; continue OSH parser/ingest gaps.
+Open ERD TODOs (TODO-2, TODO-5, TODO-7) all ship as additive Phase-2 migrations; none blocks the freeze. Current phase is **default DB replacement after canonical `eflaw` ingest verification**: migration `004`, canonical SAPA/OSH `eflaw` fetches, parser discovery/source-url support, ministry-prefixed Rule `doc_type` normalization, ADR-013 supersession, `supplementary_provisions`, `forms`, and `form_attachments` are verified in a clean throwaway DB. Next step is choosing whether to rebuild the default Compose DB or explicitly replace legacy `target=law` rows. Rule `parent_doc_id` remains an ADR-009 revisit trigger and needs a follow-up ADR before implementation.
 
 ---
 
@@ -185,4 +185,4 @@ legal-retrieval/
 
 ---
 
-_Last updated: 2026-05-06 (after ADR-020 acceptance). Update on each ADR commit._
+_Last updated: 2026-05-06 night (after canonical SAPA + OSH source-ingest verification). Update on each ADR commit._

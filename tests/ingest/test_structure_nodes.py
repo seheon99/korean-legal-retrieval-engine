@@ -23,6 +23,8 @@ def test_adr_012_key_composition() -> None:
 
     branched_item = _compose_item_segment("7.", "2", Path("sample.xml"))
     assert branched_item == "0702"
+    inline_branched_item = _compose_item_segment("3의2.", None, Path("sample.xml"))
+    assert inline_branched_item == "0302"
     assert _compose_item_key("0001001-01", "0001001.01", branched_item) == (
         "0001001-01-0702",
         "0001001.01.0702",
@@ -63,6 +65,17 @@ def test_parse_phase_1_decree_structure_nodes() -> None:
     assert by_key["0003001-00-0400"].number == "4"
     assert by_key["0003001-00-0400-01"].number == "가"
     assert by_key["0004001-00-0200-01"].parent_node_key == "0004001-00-0200"
+
+    _assert_unique_node_keys(nodes)
+    _assert_parent_keys_resolve(nodes)
+
+
+def test_parse_osh_act_inline_branched_items() -> None:
+    nodes = _sample_nodes("data/raw/eflaw/001766/283449/20260601.xml")
+    by_key = {node.node_key: node for node in nodes}
+
+    assert by_key["0049001-01-0302"].number == "3의2"
+    assert by_key["0049001-01-0302"].content.startswith("3의2.")
 
     _assert_unique_node_keys(nodes)
     _assert_parent_keys_resolve(nodes)

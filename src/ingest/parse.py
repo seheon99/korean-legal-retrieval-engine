@@ -9,15 +9,24 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
-from .records import Annex, AnnexAttachment, Document, StructureNode
+from .records import (
+    Annex,
+    AnnexAttachment,
+    Document,
+    Form,
+    FormAttachment,
+    StructureNode,
+    SupplementaryProvision,
+)
 
 
 _VALID_DOC_TYPES = ("법률", "대통령령", "총리령", "부령")
 _MINISTRY_RULE_RE = re.compile(r"^[가-힣]+부령$")
 _ARTICLE_KEY_RE = re.compile(r"^[0-9]{7}$")
+_SUPPLEMENTARY_KEY_RE = re.compile(r"^[0-9]{13}$")
 # `<별표단위 별표키>` is shared: E = annex row, F = form row.
 _ANNEX_FORM_KEY_RE = re.compile(r"^[0-9]{6}[EF]$")
-_LEADING_INT_RE = re.compile(r"^(\d+)")
+_ITEM_NUMBER_RE = re.compile(r"^\s*(\d+)(?:의(\d+))?\.?\s*$")
 _ANNEX_NUMBERED_BLOCK_RE = re.compile(r"^\d+[.)]\s")
 _ANNEX_KOREAN_LETTER_BLOCK_RE = re.compile(r"^[가-힣]\.\s")
 _DISALLOWED_BRANCH_TAGS = ("편", "장", "절", "관", "항", "목")
@@ -315,6 +324,49 @@ def parse_structure_nodes(doc: Document) -> list[StructureNode]:
     return nodes
 
 
+def parse_supplementary_provisions(doc: Document) -> list[SupplementaryProvision]:
+    """Parse top-level `<부칙>/<부칙단위>` rows.
+
+    ADR-004 keeps 부칙 as persistence-only source rows. The internal
+    `부칙내용` sub-articles remain a single text blob in Phase 1.
+    """
+    root = ET.parse(doc.xml_path).getroot()
+    supplement_root = root.find("부칙")
+    if supplement_root is None:
+        return []
+
+    provisions: list[SupplementaryProvision] = []
+    seen_keys: set[str] = set()
+    for unit in supplement_root.findall("부칙단위"):
+        provision_key = unit.attrib.get("부칙키")
+        if not provision_key:
+            raise ValueError(f"{doc.xml_path}: <부칙단위> missing 부칙키")
+        if _SUPPLEMENTARY_KEY_RE.fullmatch(provision_key) is None:
+            raise ValueError(f"{doc.xml_path}: invalid 부칙키 shape {provision_key!r}")
+        if provision_key in seen_keys:
+            raise ValueError(
+                f"{doc.xml_path}: duplicate supplementary provision_key "
+                f"{provision_key!r}"
+            )
+        seen_keys.add(provision_key)
+
+        content = _required_normalized_text(unit, "부칙내용", doc.xml_path)
+        provisions.append(
+            SupplementaryProvision(
+                provision_key=provision_key,
+                promulgated_date=_date_text(unit, "부칙공포일자", doc.xml_path),
+                promulgation_number=_parse_required_int(
+                    _required_text(unit, "부칙공포번호", doc.xml_path),
+                    "부칙공포번호",
+                    doc.xml_path,
+                ),
+                content=content,
+            )
+        )
+
+    return provisions
+
+
 def parse_annexes(doc: Document) -> list[Annex]:
     """Parse `<별표구분>별표</별표구분>` rows into `annexes` records."""
     annexes: list[Annex] = []
@@ -347,6 +399,33 @@ def parse_annexes(doc: Document) -> list[Annex]:
     return annexes
 
 
+def parse_forms(doc: Document) -> list[Form]:
+    """Parse `<별표구분>서식</별표구분>` rows into `forms` records."""
+    forms: list[Form] = []
+    seen_keys: set[str] = set()
+
+    for unit in _parse_annex_units(doc):
+        if unit.kind != "서식":
+            continue
+
+        form_key = unit.unit_key
+        if form_key in seen_keys:
+            raise ValueError(f"{doc.xml_path}: duplicate form_key {form_key!r}")
+        seen_keys.add(form_key)
+
+        forms.append(
+            Form(
+                form_key=form_key,
+                number=unit.number,
+                branch_number=unit.branch_number,
+                title=unit.title,
+                source_url=None,
+            )
+        )
+
+    return forms
+
+
 def parse_annex_attachments(doc: Document) -> list[AnnexAttachment]:
     """Parse source attachment references for annex rows only.
 
@@ -359,49 +438,83 @@ def parse_annex_attachments(doc: Document) -> list[AnnexAttachment]:
         if unit.kind != "별표":
             continue
 
-        element = unit.element
-        annex_key = unit.unit_key
-        hwp_url = _text(element, "별표서식파일링크")
-        hwp_filename = _text(element, "별표HWP파일명")
-        if hwp_url is not None or hwp_filename is not None:
-            attachments.append(
-                AnnexAttachment(
-                    annex_key=annex_key,
-                    attachment_type="hwp",
-                    source_attachment_url=hwp_url,
-                    source_filename=hwp_filename,
-                )
-            )
-
-        pdf_url = _text(element, "별표서식PDF파일링크")
-        pdf_filename = _text(element, "별표PDF파일명")
-        if pdf_url is not None or pdf_filename is not None:
-            attachments.append(
-                AnnexAttachment(
-                    annex_key=annex_key,
-                    attachment_type="pdf",
-                    source_attachment_url=pdf_url,
-                    source_filename=pdf_filename,
-                )
-            )
-
-        for image_el in element.findall("별표이미지파일명"):
-            filename = _element_text(image_el)
-            if filename is None:
-                raise ValueError(
-                    f"{doc.xml_path}: empty <별표이미지파일명> for "
-                    f"annex_key={annex_key}"
-                )
-            attachments.append(
-                AnnexAttachment(
-                    annex_key=annex_key,
-                    attachment_type="image",
-                    source_attachment_url=None,
-                    source_filename=filename,
-                )
-            )
+        attachments.extend(_parse_annex_attachment_refs(unit, doc.xml_path))
 
     return attachments
+
+
+def parse_form_attachments(doc: Document) -> list[FormAttachment]:
+    """Parse source attachment references for form rows only."""
+    attachments: list[FormAttachment] = []
+
+    for unit in _parse_annex_units(doc):
+        if unit.kind != "서식":
+            continue
+        attachments.extend(_parse_form_attachment_refs(unit, doc.xml_path))
+
+    return attachments
+
+
+def _parse_annex_attachment_refs(
+    unit: _ParsedAnnexUnit, xml_path: Path
+) -> list[AnnexAttachment]:
+    attachments: list[AnnexAttachment] = []
+    for ref in _parse_attachment_refs(unit, xml_path):
+        attachment_type, source_attachment_url, source_filename = ref
+        attachments.append(
+            AnnexAttachment(
+                annex_key=unit.unit_key,
+                attachment_type=attachment_type,
+                source_attachment_url=source_attachment_url,
+                source_filename=source_filename,
+            )
+        )
+    return attachments
+
+
+def _parse_form_attachment_refs(
+    unit: _ParsedAnnexUnit, xml_path: Path
+) -> list[FormAttachment]:
+    attachments: list[FormAttachment] = []
+    for ref in _parse_attachment_refs(unit, xml_path):
+        attachment_type, source_attachment_url, source_filename = ref
+        attachments.append(
+            FormAttachment(
+                form_key=unit.unit_key,
+                attachment_type=attachment_type,
+                source_attachment_url=source_attachment_url,
+                source_filename=source_filename,
+            )
+        )
+    return attachments
+
+
+def _parse_attachment_refs(
+    unit: _ParsedAnnexUnit, xml_path: Path
+) -> list[tuple[str, str | None, str | None]]:
+    element = unit.element
+    refs: list[tuple[str, str | None, str | None]] = []
+
+    hwp_url = _text(element, "별표서식파일링크")
+    hwp_filename = _text(element, "별표HWP파일명")
+    if hwp_url is not None or hwp_filename is not None:
+        refs.append(("hwp", hwp_url, hwp_filename))
+
+    pdf_url = _text(element, "별표서식PDF파일링크")
+    pdf_filename = _text(element, "별표PDF파일명")
+    if pdf_url is not None or pdf_filename is not None:
+        refs.append(("pdf", pdf_url, pdf_filename))
+
+    for image_el in element.findall("별표이미지파일명"):
+        filename = _element_text(image_el)
+        if filename is None:
+            raise ValueError(
+                f"{xml_path}: empty <별표이미지파일명> for "
+                f"{unit.kind} key={unit.unit_key}"
+            )
+        refs.append(("image", None, filename))
+
+    return refs
 
 
 def sha256_file(path: Path) -> str:
@@ -434,6 +547,16 @@ def _required_text(parent: ET.Element, tag: str, xml_path: Path) -> str:
     value = _text(parent, tag)
     if value is None:
         raise ValueError(f"{xml_path}: required <{tag}> missing or empty")
+    return value
+
+
+def _required_normalized_text(parent: ET.Element, tag: str, xml_path: Path) -> str:
+    el = parent.find(tag)
+    if el is None:
+        raise ValueError(f"{xml_path}: required <{tag}> missing")
+    value = _normalized_element_text(el)
+    if value is None:
+        raise ValueError(f"{xml_path}: required <{tag}> empty after normalization")
     return value
 
 
@@ -634,11 +757,12 @@ def _normalize_article_number(unit: ET.Element, xml_path: Path) -> str:
 def _normalize_item_number(
     item_number: str, branch_number: str | None, xml_path: Path
 ) -> str:
-    base = _strip_trailing_dot(item_number)
-    if branch_number is None:
-        return base
-    _parse_required_int(branch_number, "호가지번호", xml_path)
-    return f"{base}의{branch_number}"
+    item_ordinal, branch_ordinal = _parse_item_number_parts(
+        item_number, branch_number, xml_path
+    )
+    if branch_ordinal == 0:
+        return str(item_ordinal)
+    return f"{item_ordinal}의{branch_ordinal}"
 
 
 def _strip_trailing_dot(value: str) -> str:
@@ -734,17 +858,32 @@ def _compose_para_key(article_key: str, para_segment: str) -> tuple[str, str]:
 def _compose_item_segment(
     item_number: str, branch_number: str | None, xml_path: Path
 ) -> str:
-    match = _LEADING_INT_RE.match(item_number.strip())
-    if match is None:
-        raise ValueError(f"{xml_path}: cannot parse <호번호> {item_number!r}")
-    item_ordinal = int(match.group(1))
-    branch_ordinal = _parse_optional_int(branch_number, "호가지번호", xml_path)
+    item_ordinal, branch_ordinal = _parse_item_number_parts(
+        item_number, branch_number, xml_path
+    )
     if item_ordinal > 99 or branch_ordinal > 99:
         raise ValueError(
             f"{xml_path}: 호번호/호가지번호 exceeds ADR-012 two-digit segment "
             f"({item_ordinal}, {branch_ordinal})"
         )
     return f"{item_ordinal:02d}{branch_ordinal:02d}"
+
+
+def _parse_item_number_parts(
+    item_number: str, branch_number: str | None, xml_path: Path
+) -> tuple[int, int]:
+    match = _ITEM_NUMBER_RE.match(item_number)
+    if match is None:
+        raise ValueError(f"{xml_path}: cannot parse <호번호> {item_number!r}")
+    item_ordinal = int(match.group(1))
+    inline_branch = int(match.group(2)) if match.group(2) is not None else 0
+    branch_ordinal = _parse_optional_int(branch_number, "호가지번호", xml_path)
+    if branch_ordinal and inline_branch and branch_ordinal != inline_branch:
+        raise ValueError(
+            f"{xml_path}: <호번호> {item_number!r} disagrees with "
+            f"<호가지번호> {branch_number!r}"
+        )
+    return item_ordinal, branch_ordinal or inline_branch
 
 
 def _compose_item_key(

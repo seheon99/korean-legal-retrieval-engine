@@ -6,8 +6,8 @@ Phase 3 — 총리령/부령: parent_doc_id = NULL (ADR-009 patch #5
                        defers 부령 제1조 delegation parsing).
 
 Children-table inserts are intentionally incremental. `structure_nodes`,
-`annexes`, and `annex_attachments` are implemented; supplementary
-provisions and forms remain deferred parser passes.
+`supplementary_provisions`, `annexes`, `annex_attachments`, `forms`, and
+`form_attachments` are implemented for the Phase-1 source layer.
 """
 
 from __future__ import annotations
@@ -15,7 +15,9 @@ from __future__ import annotations
 import logging
 import os
 from collections import defaultdict
+from datetime import datetime, time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import psycopg
 from psycopg import Connection
@@ -25,7 +27,10 @@ from .parse import (
     parse_annex_attachments,
     parse_annexes,
     parse_doc,
+    parse_form_attachments,
+    parse_forms,
     parse_structure_nodes,
+    parse_supplementary_provisions,
 )
 from .records import Document, DocType
 
@@ -34,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 PHASE_ORDER: tuple[DocType, ...] = ("법률", "대통령령", "총리령", "부령")
 DECREE_SUFFIX = " 시행령"
+KST = ZoneInfo("Asia/Seoul")
 
 
 class ContentMismatchError(Exception):
@@ -63,7 +69,10 @@ def run(raw_dir: Path, *, dsn: str | None = None) -> None:
     # READ COMMITTED — visibility kicks in at COMMIT.
     with psycopg.connect(dsn) as conn:
         for doc_type in PHASE_ORDER:
-            docs = by_type.get(doc_type, [])
+            docs = sorted(
+                by_type.get(doc_type, []),
+                key=lambda doc: (doc.effective_date, doc.law_id, doc.mst),
+            )
             if not docs:
                 continue
             logger.info("phase %s: %d doc(s)", doc_type, len(docs))
@@ -71,9 +80,18 @@ def run(raw_dir: Path, *, dsn: str | None = None) -> None:
                 for doc in docs:
                     if _skip_if_present(conn, doc):
                         continue
+                    effective_at = _effective_at(doc)
                     parent_doc_id = _resolve_parent(conn, doc)
-                    new_id = _insert_legal_document(conn, doc, parent_doc_id)
-                    _insert_children(conn, doc, new_id)
+                    superseded_doc_ids = _supersede_existing_heads(
+                        conn, doc, effective_at
+                    )
+                    new_id = _insert_legal_document(
+                        conn, doc, parent_doc_id, effective_at
+                    )
+                    _supersede_temporal_children(
+                        conn, superseded_doc_ids, effective_at
+                    )
+                    _insert_children(conn, doc, new_id, effective_at)
 
 
 def _skip_if_present(conn: Connection, doc: Document) -> bool:
@@ -108,6 +126,61 @@ def _skip_if_present(conn: Connection, doc: Document) -> bool:
     )
 
 
+def _effective_at(doc: Document) -> datetime:
+    return datetime.combine(doc.effective_date, time.min, tzinfo=KST)
+
+
+def _supersede_existing_heads(
+    conn: Connection, doc: Document, incoming_effective_at: datetime
+) -> list[int]:
+    sql = """
+        UPDATE legal_documents
+        SET is_head = FALSE,
+            superseded_at = %s,
+            updated_at = NOW()
+        WHERE law_id = %s
+          AND is_head = TRUE
+        RETURNING doc_id
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (incoming_effective_at, doc.law_id))
+        rows = cur.fetchall()
+    superseded_doc_ids = [row[0] for row in rows]
+    if superseded_doc_ids:
+        logger.info(
+            "superseded %d legal_document head row(s) for law_id=%s at %s",
+            len(superseded_doc_ids),
+            doc.law_id,
+            incoming_effective_at.isoformat(),
+        )
+    return superseded_doc_ids
+
+
+def _supersede_temporal_children(
+    conn: Connection, doc_ids: list[int], incoming_effective_at: datetime
+) -> None:
+    if not doc_ids:
+        return
+
+    for table in ("structure_nodes", "annexes", "forms"):
+        sql = f"""
+            UPDATE {table}
+            SET is_head = FALSE,
+                superseded_at = %s,
+                updated_at = NOW()
+            WHERE doc_id = ANY(%s::bigint[])
+              AND is_head = TRUE
+        """
+        with conn.cursor() as cur:
+            cur.execute(sql, (incoming_effective_at, doc_ids))
+            logger.info(
+                "superseded %d %s row(s) under doc_id(s)=%s",
+                cur.rowcount,
+                table,
+                doc_ids,
+            )
+
+
 def _resolve_parent(conn: Connection, doc: Document) -> int | None:
     """Apply the ADR-009 population rule — the load-bearing piece."""
     if doc.doc_type == "법률":
@@ -139,7 +212,10 @@ def _resolve_parent(conn: Connection, doc: Document) -> int | None:
 
 
 def _insert_legal_document(
-    conn: Connection, doc: Document, parent_doc_id: int | None
+    conn: Connection,
+    doc: Document,
+    parent_doc_id: int | None,
+    effective_at: datetime,
 ) -> int:
     sql = """
         INSERT INTO legal_documents (
@@ -147,7 +223,7 @@ def _insert_legal_document(
           doc_type, doc_type_code, amendment_type, enacted_date,
           effective_date, competent_authority, competent_authority_code,
           structure_code, legislation_reason, source_url, content_hash,
-          is_head
+          effective_at, superseded_at, is_head
         ) VALUES (
           %(parent_doc_id)s, %(law_id)s, %(mst)s, %(title)s,
           %(title_abbrev)s, %(law_number)s, %(doc_type)s,
@@ -155,12 +231,13 @@ def _insert_legal_document(
           %(effective_date)s, %(competent_authority)s,
           %(competent_authority_code)s, %(structure_code)s,
           %(legislation_reason)s, %(source_url)s, %(content_hash)s,
-          TRUE
+          %(effective_at)s, NULL, TRUE
         )
         RETURNING doc_id
     """
     params = doc.model_dump(exclude={"xml_path"})
     params["parent_doc_id"] = parent_doc_id
+    params["effective_at"] = effective_at
     with conn.cursor() as cur:
         cur.execute(sql, params)
         row = cur.fetchone()
@@ -173,29 +250,33 @@ def _insert_legal_document(
     return doc_id
 
 
-def _insert_children(conn: Connection, doc: Document, doc_id: int) -> None:
-    """Insert parsed child rows for `doc`.
-
-    Forms remain intentionally out of scope until a form-bearing corpus
-    enters Phase-1 scope.
-    """
-    _insert_structure_nodes(conn, doc, doc_id)
-    annex_ids = _insert_annexes(conn, doc, doc_id)
+def _insert_children(
+    conn: Connection, doc: Document, doc_id: int, effective_at: datetime
+) -> None:
+    """Insert parsed child rows for `doc`."""
+    _insert_structure_nodes(conn, doc, doc_id, effective_at)
+    _insert_supplementary_provisions(conn, doc, doc_id)
+    annex_ids = _insert_annexes(conn, doc, doc_id, effective_at)
     _insert_annex_attachments(conn, doc, annex_ids)
+    form_ids = _insert_forms(conn, doc, doc_id, effective_at)
+    _insert_form_attachments(conn, doc, form_ids)
 
 
-def _insert_structure_nodes(conn: Connection, doc: Document, doc_id: int) -> None:
+def _insert_structure_nodes(
+    conn: Connection, doc: Document, doc_id: int, effective_at: datetime
+) -> None:
     nodes = parse_structure_nodes(doc)
     node_ids: dict[str, int] = {}
     sql = """
         INSERT INTO structure_nodes (
           doc_id, parent_id, level, node_key, number, title, content,
           sort_key, effective_date, is_changed, source_url, content_hash,
-          is_head
+          effective_at, superseded_at, is_head
         ) VALUES (
           %(doc_id)s, %(parent_id)s, %(level)s, %(node_key)s, %(number)s,
           %(title)s, %(content)s, %(sort_key)s, %(effective_date)s,
-          %(is_changed)s, %(source_url)s, %(content_hash)s, TRUE
+          %(is_changed)s, %(source_url)s, %(content_hash)s,
+          %(effective_at)s, NULL, TRUE
         )
         RETURNING node_id
     """
@@ -212,6 +293,7 @@ def _insert_structure_nodes(conn: Connection, doc: Document, doc_id: int) -> Non
             params = node.model_dump(exclude={"parent_node_key"})
             params["doc_id"] = doc_id
             params["parent_id"] = parent_id
+            params["effective_at"] = effective_at
             cur.execute(sql, params)
             row = cur.fetchone()
             assert row is not None
@@ -223,17 +305,46 @@ def _insert_structure_nodes(conn: Connection, doc: Document, doc_id: int) -> Non
     )
 
 
-def _insert_annexes(conn: Connection, doc: Document, doc_id: int) -> dict[str, int]:
+def _insert_supplementary_provisions(
+    conn: Connection, doc: Document, doc_id: int
+) -> None:
+    provisions = parse_supplementary_provisions(doc)
+    sql = """
+        INSERT INTO supplementary_provisions (
+          doc_id, provision_key, promulgated_date, promulgation_number, content
+        ) VALUES (
+          %(doc_id)s, %(provision_key)s, %(promulgated_date)s,
+          %(promulgation_number)s, %(content)s
+        )
+    """
+    with conn.cursor() as cur:
+        for provision in provisions:
+            params = provision.model_dump()
+            params["doc_id"] = doc_id
+            cur.execute(sql, params)
+
+    logger.info(
+        "inserted %d supplementary_provision row(s) for doc_id=%d (%s)",
+        len(provisions),
+        doc_id,
+        doc.title,
+    )
+
+
+def _insert_annexes(
+    conn: Connection, doc: Document, doc_id: int, effective_at: datetime
+) -> dict[str, int]:
     annexes = parse_annexes(doc)
     annex_ids: dict[str, int] = {}
     sql = """
         INSERT INTO annexes (
           doc_id, annex_key, number, branch_number, title, content_text,
-          content_format, source_url, content_hash, is_head
+          content_format, source_url, content_hash,
+          effective_at, superseded_at, is_head
         ) VALUES (
           %(doc_id)s, %(annex_key)s, %(number)s, %(branch_number)s,
           %(title)s, %(content_text)s, %(content_format)s, %(source_url)s,
-          %(content_hash)s, TRUE
+          %(content_hash)s, %(effective_at)s, NULL, TRUE
         )
         RETURNING annex_id
     """
@@ -241,6 +352,7 @@ def _insert_annexes(conn: Connection, doc: Document, doc_id: int) -> dict[str, i
         for annex in annexes:
             params = annex.model_dump()
             params["doc_id"] = doc_id
+            params["effective_at"] = effective_at
             cur.execute(sql, params)
             row = cur.fetchone()
             assert row is not None
@@ -282,4 +394,71 @@ def _insert_annex_attachments(
     logger.info(
         "inserted %d annex_attachment row(s) for %s",
         len(attachments), doc.title,
+    )
+
+
+def _insert_forms(
+    conn: Connection, doc: Document, doc_id: int, effective_at: datetime
+) -> dict[str, int]:
+    forms = parse_forms(doc)
+    form_ids: dict[str, int] = {}
+    sql = """
+        INSERT INTO forms (
+          doc_id, form_key, number, branch_number, title, source_url,
+          effective_at, superseded_at, is_head
+        ) VALUES (
+          %(doc_id)s, %(form_key)s, %(number)s, %(branch_number)s,
+          %(title)s, %(source_url)s, %(effective_at)s, NULL, TRUE
+        )
+        RETURNING form_id
+    """
+    with conn.cursor() as cur:
+        for form in forms:
+            params = form.model_dump()
+            params["doc_id"] = doc_id
+            params["effective_at"] = effective_at
+            cur.execute(sql, params)
+            row = cur.fetchone()
+            assert row is not None
+            form_ids[form.form_key] = row[0]
+
+    logger.info(
+        "inserted %d form row(s) for doc_id=%d (%s)",
+        len(forms),
+        doc_id,
+        doc.title,
+    )
+    return form_ids
+
+
+def _insert_form_attachments(
+    conn: Connection, doc: Document, form_ids: dict[str, int]
+) -> None:
+    attachments = parse_form_attachments(doc)
+    sql = """
+        INSERT INTO form_attachments (
+          form_id, attachment_type, source_attachment_url, source_filename,
+          stored_file_path, checksum_sha256, fetched_at
+        ) VALUES (
+          %(form_id)s, %(attachment_type)s, %(source_attachment_url)s,
+          %(source_filename)s, %(stored_file_path)s, %(checksum_sha256)s,
+          %(fetched_at)s
+        )
+    """
+    with conn.cursor() as cur:
+        for attachment in attachments:
+            form_id = form_ids.get(attachment.form_key)
+            if form_id is None:
+                raise LookupError(
+                    f"Form {attachment.form_key!r} not inserted before "
+                    f"attachment ({doc.title}, mst={doc.mst})"
+                )
+            params = attachment.model_dump(exclude={"form_key"})
+            params["form_id"] = form_id
+            cur.execute(sql, params)
+
+    logger.info(
+        "inserted %d form_attachment row(s) for %s",
+        len(attachments),
+        doc.title,
     )

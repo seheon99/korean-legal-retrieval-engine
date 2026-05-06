@@ -61,6 +61,15 @@ class StructureNode(BaseModel):
     content_hash: str
 
 
+class SupplementaryProvision(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    provision_key: str
+    promulgated_date: date
+    promulgation_number: int
+    content: str
+
+
 class Annex(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -74,10 +83,32 @@ class Annex(BaseModel):
     content_hash: str
 
 
+class Form(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    form_key: str
+    number: str
+    branch_number: str | None
+    title: str
+    source_url: str | None
+
+
 class AnnexAttachment(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     annex_key: str
+    attachment_type: AttachmentType
+    source_attachment_url: str | None
+    source_filename: str | None
+    stored_file_path: str | None = None
+    checksum_sha256: str | None = None
+    fetched_at: datetime | None = None
+
+
+class FormAttachment(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    form_key: str
     attachment_type: AttachmentType
     source_attachment_url: str | None
     source_filename: str | None

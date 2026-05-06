@@ -1,8 +1,8 @@
 # Korean Legal Retrieval Engine — Phase 1 Progress
 
-> **Status**: Phase-1 statute ERD frozen (ADR-010, 2026-04-29), amended by ADR-013 (`is_current` → `is_head`) and ADR-014 (parallel `annex_attachments` / `form_attachments`; no `attachment_blobs` in Phase 1). ADR-015 accepted raw SQL migration management with a `schema_migrations` ledger. ADR-016 accepted annex attachment binary retention under `data/annexes/`; ADR-017 narrows default retention to PDF with HWP fallback; ADR-018 de-layouts annex `content_text` for retrieval. ADR-019 expands Phase 1 from SAPA-only to the SAPA + OSH full statutory families and makes the first retrieval baseline hybrid. ADR-020 accepted `target=eflaw` as the canonical statute XML source; migration `004_eflaw_identity.sql`, canonical SAPA/OSH `eflaw` fetches, parser discovery/source-url support, and `(law_id, mst, effective_date)` idempotency are implemented and SAPA clean-DB verified. OSH Rule `고용노동부령` is normalized to canonical DB `부령` per ADR-006 taxonomy and 법제처 explanation. Running Compose `database`: 2 `legal_documents`, 240 normalized `structure_nodes`, 5 `annexes`, 21 `annex_attachments`; 5 PDF attachment rows are locally retained and HWP/image rows remain provenance-only (2026-05-06).
+> **Status**: Phase-1 statute ERD frozen (ADR-010, 2026-04-29), amended by ADR-013 (`is_current` → `is_head`) and ADR-014 (parallel `annex_attachments` / `form_attachments`; no `attachment_blobs` in Phase 1). ADR-015 accepted raw SQL migration management with a `schema_migrations` ledger. ADR-016 accepted annex attachment binary retention under `data/annexes/`; ADR-017 narrows default retention to PDF with HWP fallback; ADR-018 de-layouts annex `content_text` for retrieval. ADR-019 expands Phase 1 from SAPA-only to the SAPA + OSH full statutory families and makes the first retrieval baseline hybrid. ADR-020 accepted `target=eflaw` as the canonical statute XML source. Canonical SAPA/OSH `eflaw` ingest now parses and loads all source tables: `legal_documents`, `structure_nodes`, `supplementary_provisions`, `annexes`, `annex_attachments`, `forms`, and `form_attachments`. Clean throwaway DB verification: 11 documents, 11,384 structure nodes, 141 supplementary provisions, 129 annexes, 774 annex attachments, 222 forms, 712 form attachments. Default Compose DB still needs an explicit replacement posture because older rows were loaded from legacy `target=law` XML.
 > **Generated**: Hand-off artifact for next session recall (now superseded by ADRs 001–020 for accepted Phase-1 statute schema, ingestion, scope, and raw-identity decisions).
-> **Next session task**: resume OSH parser/ingest gaps now that ministry-prefixed Rule `doc_type` normalization is implemented.
+> **Next session task**: choose the default DB replacement posture, then either rebuild the dev DB from canonical `eflaw` or define an explicit legacy-row replacement step.
 
 ---
 
@@ -290,7 +290,9 @@ Tasks agreed in earlier sessions (✅ done, 🔶 in progress, ⏸️ pending):
 
 ✅ **T3-A**: Fetch the Serious Accidents Punishment Act body via script
 - Landed as `scripts/fetch_law_samples.sh` on 2026-05-01.
-- Raw XML retained under `data/raw/{law_id}/{mst}.xml` per ADR-011.
+- Legacy raw XML was initially retained under `data/raw/{law_id}/{mst}.xml`
+  per ADR-011; ADR-020 supersedes the canonical path to
+  `data/raw/eflaw/{law_id}/{mst}/{efYd}.xml`.
 - Confirmed Phase-1 statute corpus is Act `228817` + Decree `277417`; no 시행규칙 exists for this statute.
 
 ✅ **T4-A**: Analyze response structure
@@ -487,18 +489,18 @@ The shared structure of these six slips:
 
 ## 10. Next Session Starting Guide
 
-**Phase-1 statute ERD is frozen** as `migrations/001_statute_tables.sql` (ADR-010, 2026-04-29), with ADR-013 amending the temporality flag from `is_current` to `is_head` and ADR-014 adding parallel `annex_attachments` / `form_attachments` while deferring `attachment_blobs`. ADR-015 sets post-freeze migration management as ordered raw SQL files plus a `schema_migrations` ledger. ADR-016 stores downloaded annex binaries under `data/annexes/`; ADR-017 makes PDF the default retained format with HWP fallback; ADR-018 defines annex content de-layout normalization. ADR-019 expands Phase 1 from SAPA-only to SAPA + OSH full statutory families and pulls the first hybrid retrieval baseline into Phase 1. Accepted decision context for the Phase-1 statute schema, ingestion, scope, and raw identity lives in `docs/decisions/ADR-001` through `ADR-020`. The current phase is **canonical `eflaw` ingestion rollout**. SAPA canonical `eflaw` files exist and clean-DB ingest is verified; the running Compose DB has migration `004` but still contains rows originally loaded from legacy `target=law` XML. OSH canonical `eflaw` files are fetched; OSH source ingestion remains open.
+**Phase-1 statute ERD is frozen** as `migrations/001_statute_tables.sql` (ADR-010, 2026-04-29), with ADR-013 amending the temporality flag from `is_current` to `is_head` and ADR-014 adding parallel `annex_attachments` / `form_attachments` while deferring `attachment_blobs`. ADR-015 sets post-freeze migration management as ordered raw SQL files plus a `schema_migrations` ledger. ADR-016 stores downloaded annex binaries under `data/annexes/`; ADR-017 makes PDF the default retained format with HWP fallback; ADR-018 defines annex content de-layout normalization. ADR-019 expands Phase 1 from SAPA-only to SAPA + OSH full statutory families and pulls the first hybrid retrieval baseline into Phase 1. Accepted decision context for the Phase-1 statute schema, ingestion, scope, and raw identity lives in `docs/decisions/ADR-001` through `ADR-020`. The current phase is **canonical `eflaw` ingestion rollout**. A clean throwaway DB verified canonical SAPA + OSH ingestion across all Phase-1 source tables. The default Compose DB has migration `004` but still needs explicit replacement/rebuild because it was previously loaded from legacy `target=law` XML.
 
 **Do immediately on next session**:
 
 1. Read `CLAUDE.md` (entry point) and the latest `docs/sessions/*.md`.
 2. Confirm scope with owner before generating output.
 3. **Recommended next action: choose DB replacement posture.** Canonical SAPA `eflaw` bytes differ from legacy `target=law` bytes, so existing rows should be clean-rebuilt or explicitly replaced, not silently updated by idempotent ingest.
-4. OSH canonical `eflaw` slices are fetched, and ministry-prefixed Rule `doc_type` normalization is implemented.
-5. Continue source-ingestion gaps for OSH: ADR-013 slice supersession behavior, persistence-only `supplementary_provisions`, and persistence-only `forms` / `form_attachments` are active blockers because OSH has 시행규칙 and forms.
+4. After replacement, run canonical `eflaw` ingest against the default Compose DB and verify counts against the clean smoke result.
+5. Rule `parent_doc_id` remains the ADR-009 revisit trigger: first 시행규칙-bearing statute is now in scope, but Act-vs-Decree parentage needs a follow-up ADR before implementation.
 6. **Decide the ADR-018 production boundary scorer.** Current annex de-layouting uses a reviewed deterministic Phase-1 substitute; choose the Korean tokenizer / morphological analyzer before broadening the scorer.
 7. **ADR-006 verification is closed for OSH Rule.** 법제처 confirms 시행령 = `대통령령` and 시행규칙 = `총리령ㆍ부령`; parser normalization maps ministry-prefixed `*부령` values such as `고용노동부령` to canonical DB `부령`.
-8. **Heading generalization is open outside the SAPA corpus.** The 2026-05-04 Docker smoke against all local `data/raw` showed `형법` duplicates `조문키='0001000'` for multiple `전문` heading rows. Verify OSH heading shapes from API samples before changing the parser.
+8. **Heading generalization is open outside the SAPA + OSH corpus.** OSH inline branched `<호번호>` values such as `3의2.` are handled; the older broad-smoke issue for unrelated `형법` multiple-`전문` headings remains outside Phase 1.
 9. Open ERD TODOs (TODO-2, TODO-5, TODO-7) ship as additive Phase-2 migrations; none blocks ADR-019 OSH discovery.
 
 **Closed dependencies** (no longer on the implement-list):
@@ -515,6 +517,7 @@ The shared structure of these six slips:
 - ADR-020 `eflaw` canonical statute XML source — accepted on 2026-05-06 after OSH discovery proved same-MST/different-efYd XML divergence; `target=law` is auxiliary only.
 - ADR-020 executable slice — landed on 2026-05-06. `004_eflaw_identity.sql`, canonical SAPA `eflaw` fetches, parser discovery/source-url support, and `(law_id, mst, effective_date)` idempotency are clean-DB verified.
 - OSH canonical `eflaw` fetch — completed on 2026-05-06. Act and Decree parse at doc level; Rule `고용노동부령` now normalizes to canonical DB `부령`.
+- OSH source-table ingestion — completed in the 2026-05-06 night session. Parser handles OSH inline branched `<호번호>` values, inserts persistence-only `supplementary_provisions`, inserts metadata-only `forms` plus `form_attachments`, and applies ADR-013 supersession to `legal_documents`, `structure_nodes`, `annexes`, and `forms`.
 
 **Phase-2 follow-up parking lot** (separate ADRs at the boundary):
 - Drop `sort_key` column per ADR-012 §Consequences — redundant with tagless `node_key` under the accepted encoding.
@@ -594,4 +597,5 @@ The shared structure of these six slips:
 - v1.14 (2026-05-06): ADR-020 accepted. §10 now points to implementation: migration from `UNIQUE(mst)` to `(law_id, mst, effective_date)`, canonical `eflaw` fetches under `data/raw/eflaw/{law_id}/{mst}/{efYd}.xml`, and verified replacement/removal of legacy SAPA `target=law` raw XML.
 - v1.15 (2026-05-06): ADR-020 executable slice landed. Added `004_eflaw_identity.sql`; upgraded fetch, parser discovery/source URL, and idempotency to canonical `eflaw`; fetched SAPA canonical `eflaw` XML; clean throwaway DB verified migrations `001`-`004` plus ingest. Existing running DB rows remain legacy-source rows and need clean rebuild or explicit replacement.
 - v1.16 (2026-05-06): OSH canonical `eflaw` XML fetched for Act, Decree, and Rule current/future slices. Doc-level parsing initially succeeded for OSH Act/Decree and halted on OSH Rule `고용노동부령`, surfacing the ministry-prefixed rule handling gap later corrected in v1.17.
-- v1.17 (2026-05-07): Corrected ADR-006 interpretation using 법제처 explanation: 시행령 is 대통령령 and 시행규칙 is 총리령/부령. Implemented parser normalization from ministry-prefixed `*부령` values such as `고용노동부령` to canonical DB `부령`; original value remains in retained raw XML and `doc_type_code` remains captured.
+- v1.17 (2026-05-06 night): Corrected ADR-006 interpretation using 법제처 explanation: 시행령 is 대통령령 and 시행규칙 is 총리령/부령. Implemented parser normalization from ministry-prefixed `*부령` values such as `고용노동부령` to canonical DB `부령`; original value remains in retained raw XML and `doc_type_code` remains captured.
+- v1.18 (2026-05-06 night): Canonical SAPA + OSH source ingestion verified end-to-end in clean throwaway DB `osh_ingest_smoke_20260506_night`: 11 `legal_documents`, 11,384 `structure_nodes`, 141 `supplementary_provisions`, 129 `annexes`, 774 `annex_attachments`, 222 `forms`, and 712 `form_attachments`. Implemented ADR-013 supersession lifecycle with KST `effective_at`, chronological phase ordering, temporal child supersession, supplementary provision inserts, form/form-attachment inserts, and inline branched 호번호 parsing (`3의2.` -> node key segment `0302`).
