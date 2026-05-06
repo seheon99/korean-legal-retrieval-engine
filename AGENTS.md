@@ -11,8 +11,12 @@ Korean Legal Retrieval Engine — **R-layer only**, not full RAG.
 Dual goal: production-grade retrieval engine + portfolio asset for H1 2027 hiring (Kakao / Naver / Coupang / Toss).
 Owner: Seheon — freelance backend (Kotlin/Spring · TS/NestJS · Python); SeoulTech CS; SW Maestro 14기.
 
-**Phase 1 Walking Skeleton**: 중대재해처벌법 (Serious Accidents Punishment Act, 2021).
-Single statute end-to-end before any generalization. Scope is intentionally narrow.
+**Phase 1 Statutory Baseline** (ADR-019, 2026-05-06): SAPA + OSH full statutory families.
+Scope remains intentionally narrow inside 성문규범:
+- `중대재해 처벌 등에 관한 법률` Act + Enforcement Decree.
+- `산업안전보건법` Act + Enforcement Decree + Enforcement Rule.
+Retrieval/eval defaults to the legally effective slice as of 2026-05-06;
+head/future rows require explicit query mode.
 
 ---
 
@@ -45,21 +49,21 @@ Single statute end-to-end before any generalization. Scope is intentionally narr
 
 ## 4. Current Phase
 
-**D-1: 성문규범 ERD — frozen.** ADR-001 through ADR-012 accepted; Phase-1 statute schema committed as `migrations/001_statute_tables.sql` (per ADR-010, 2026-04-29).
+**D-1: 성문규범 ERD — frozen.** ADR-001 through ADR-019 accepted; Phase-1 statute schema committed as `migrations/001_statute_tables.sql` (per ADR-010, 2026-04-29), with post-freeze migrations through `003_is_head_rename.sql`.
 
 **Hard rule**: API response sample comes before schema design. We do not own the data — 법제처 does. Drawing the ERD before seeing the actual XML guarantees a rewrite.
 
-Phase-1 schema (per ADRs 001–010):
+Phase-1 schema (per ADRs 001–019):
 - Five source tables: `legal_documents`, `structure_nodes`, `supplementary_provisions`, `annexes`, `forms` (ADR-002, ADR-004).
 - `chunks` is the unified search index (separate migration, ships with retrieval-pipeline design). Phase-1 source FK columns are closed at two: `structure_node_id`, `annex_id` (ADR-003, ADR-005). `supplementary_provisions` is persistence-only, not a chunk source.
 - `doc_type` (TEXT + CHECK over {법률, 대통령령, 총리령, 부령}) and `level` (SMALLINT + CHECK over 1..8 → 편→장→절→관→조→항→호→목) per ADR-006. `doc_type_code TEXT NULL` sibling column captures `법종구분코드` for provenance (ADR-007).
 - No JSONB `metadata` column on either `legal_documents` or `structure_nodes` (ADR-008). Forward policy: promote when needed, omit deliberately, retain raw API XML as the canonical fallback. `chunks.metadata` JSONB is unaffected (separate role).
 - Raw API XML retention committed via ADR-011: filesystem store at `data/raw/{law_id}/{mst}.xml`, indefinite retention, plain UTF-8, gitignored. Integrity link: SHA-256 of file = `legal_documents.content_hash`. Closes ADR-008's soft retention dependency.
-- `parent_doc_id` self-FK on `legal_documents` for Act↔Decree linkage (ADR-009, amended by ADR-013). Asymmetric CHECK enforces "Acts have NULL parents"; a partial UNIQUE INDEX on `(title) WHERE doc_type='법률' AND is_head=true` should back the population-rule lookup; reverse-traversal index on `(parent_doc_id) WHERE parent_doc_id IS NOT NULL`. Rules-parent assignment deferred until first 시행규칙-bearing statute enters scope.
+- `parent_doc_id` self-FK on `legal_documents` for Act↔Decree linkage (ADR-009, amended by ADR-013). Asymmetric CHECK enforces "Acts have NULL parents"; a partial UNIQUE INDEX on `(title) WHERE doc_type='법률' AND is_head=true` backs the population-rule lookup; reverse-traversal index on `(parent_doc_id) WHERE parent_doc_id IS NOT NULL`. OSH 시행규칙 now makes Rule-parent assignment live verification work.
 - `image_filenames TEXT[]` on `annexes` and `forms` (ADR-010 sub-decision; closes ADR-008 "Out of scope" #2).
 - `structure_nodes.node_key` / `sort_key` population rules per ADR-012 (2026-05-03): tagless ASCII format `{조문키}-{HH}-{NN}{BB}-{KK}` with ordinal at 항/목, parsed `<호번호>`+`<호가지번호>` at 호. Branch numbering scope per *법령의개정방식과폐지방식* — 조 and 호 only; verification trigger halts on any branch element at 편/장/절/관/항/목. **Phase-2 follow-up**: drop `sort_key` column (redundant with tagless `node_key`).
 
-Open ERD TODOs (TODO-2, TODO-5, TODO-7) all ship as additive Phase-2 migrations; none blocks the freeze. Current phase is **ingestion-pipeline / query-layer implementation**: ADR-009 population rule landed and DB-verified (2026-05-03); idempotent re-ingest landed; ADR-012 keying convention accepted but `_insert_children` parser depth not yet implemented. ADR-006 verification trigger for ministry-prefixed `doc_type` and ADR-012's branch-element trigger remain unimplemented (defensive boundary work).
+Open ERD TODOs (TODO-2, TODO-5, TODO-7) all ship as additive Phase-2 migrations; none blocks the freeze. Current phase is **ADR-019 OSH API discovery before code changes**: SAPA Act + Decree source ingestion is DB-verified; OSH Act/Decree/Rule exact API records are not yet fetched. Next step is law.go.kr `lawSearch.do` / `lawService.do` discovery for `target=law` and `target=eflaw`, including the raw-retention identity check for `(law_id, mst, efYd)`.
 
 ---
 
@@ -171,9 +175,9 @@ legal-retrieval/
 
 - Full RAG generation (G-layer).
 - LangChain / LlamaIndex / any orchestrator framework.
-- Multi-domain coverage in Phase 1 (single statute first; expansion is Phase 2+).
+- Non-statutory Phase-1 expansion before the SAPA + OSH statutory baseline is measured.
 - LLM Router / Multi-agent before an evaluation baseline exists. *Anti-pattern: routing without measurement.*
 
 ---
 
-*Last updated: 2026-05-03 (after ADR-012). Update on each ADR commit.*
+*Last updated: 2026-05-06 (after ADR-019). Update on each ADR commit.*

@@ -17,15 +17,15 @@ statute baseline:
   reranker — with `bge-m3` and KURE compared before freezing the embedding
   choice.
 
-This is ADR-level scope expansion. The first required artifact is
-[ADR-019](../decisions/ADR-019-phase-1-osh-scope.md) in `Proposed`
-status. No fetch-script, parser, schema, or retrieval implementation should
-ship until ADR-019 is accepted.
+This is ADR-level scope expansion. Seheon accepted
+[ADR-019](decisions/ADR-019-phase-1-osh-scope.md) on 2026-05-06. The next
+required step is API discovery before code changes.
 
 ## Implementation Roadmap
 
 1. **Scope ADR**
-   - Draft ADR-019 to amend the old "single statute first" Phase-1 rule.
+   - ADR-019 accepted the amendment to the old "single statute first"
+     Phase-1 rule.
    - State that Phase 1 now covers SAPA + OSH full statutory families.
    - Keep `supplementary_provisions` and `forms` persistence-only, not
      chunk sources.

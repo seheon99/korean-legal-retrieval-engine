@@ -1,8 +1,8 @@
 # Korean Legal Retrieval Engine — Phase 1 Progress
 
-> **Status**: Phase-1 statute ERD frozen (ADR-010, 2026-04-29), amended by ADR-013 (`is_current` → `is_head`) and ADR-014 (parallel `annex_attachments` / `form_attachments`; no `attachment_blobs` in Phase 1). ADR-015 accepted raw SQL migration management with a `schema_migrations` ledger. ADR-016 accepted annex attachment binary retention under `data/annexes/`; ADR-017 narrows default retention to PDF with HWP fallback; ADR-018 de-layouts annex `content_text` for retrieval. Schema baseline committed at `migrations/001_statute_tables.sql`; post-freeze migrations landed through `003_is_head_rename.sql`. ADR-009 population rule, idempotent re-ingest, `structure_nodes`, `annexes` + `annex_attachments` ingestion, PDF-default binary retention, and annex content de-layouting are DB-verified. Running Compose `database`: 2 `legal_documents`, 240 normalized `structure_nodes`, 5 `annexes`, 21 `annex_attachments`; 5 PDF attachment rows are locally retained and HWP/image rows remain provenance-only (2026-05-06).
-> **Generated**: Hand-off artifact for next session recall (now superseded by ADRs 001–018 for Phase-1 statute schema + ingestion decisions; this document remains canonical for cross-category context, license matrix, and DA log).
-> **Next session task**: implement persistence-only `supplementary_provisions` ingestion per ADR-005, unless tokenizer selection for ADR-018's production boundary scorer is prioritized first.
+> **Status**: Phase-1 statute ERD frozen (ADR-010, 2026-04-29), amended by ADR-013 (`is_current` → `is_head`) and ADR-014 (parallel `annex_attachments` / `form_attachments`; no `attachment_blobs` in Phase 1). ADR-015 accepted raw SQL migration management with a `schema_migrations` ledger. ADR-016 accepted annex attachment binary retention under `data/annexes/`; ADR-017 narrows default retention to PDF with HWP fallback; ADR-018 de-layouts annex `content_text` for retrieval. ADR-019 expands Phase 1 from SAPA-only to the SAPA + OSH full statutory families and makes the first retrieval baseline hybrid. Schema baseline committed at `migrations/001_statute_tables.sql`; post-freeze migrations landed through `003_is_head_rename.sql`. SAPA Act + Decree ingestion remains DB-verified. OSH API discovery and ingestion have not started yet. Running Compose `database`: 2 `legal_documents`, 240 normalized `structure_nodes`, 5 `annexes`, 21 `annex_attachments`; 5 PDF attachment rows are locally retained and HWP/image rows remain provenance-only (2026-05-06).
+> **Generated**: Hand-off artifact for next session recall (now superseded by ADRs 001–019 for Phase-1 statute schema, ingestion, and scope decisions; this document remains canonical for cross-category context, license matrix, and DA log).
+> **Next session task**: run ADR-019 OSH API discovery for Act, 시행령, and 시행규칙. Record exact returned `law_id`, `mst`, title, `doc_type`, effective date, and head/effective-slice interpretation before code changes.
 
 ---
 
@@ -22,7 +22,7 @@
 
 **Scope decisions** 🔶
 - ✅ Retrieval-only (R-layer of RAG). Generation is out of scope.
-- ✅ Domain: Korean law. Phase 1 narrowed to **Serious Accidents Punishment Act (중대재해처벌법)**.
+- ✅ Domain: Korean law. Phase 1 scope is now the **SAPA + OSH statutory neighborhood**: `중대재해 처벌 등에 관한 법률` family plus `산업안전보건법` family (ADR-019).
 - ✅ Goal: engine maturity + portfolio for Korean big-tech recruiting (target: H1 2027).
 
 **Owner background (for recall)**
@@ -75,11 +75,12 @@ This category set was reached through several Devil's Advocation rounds:
 **Concrete Phase 1 scope** 🔶
 
 Statute:
-- ✅ Serious Accidents Punishment Act (current)
-- ✅ Enforcement Decree of the Act (current)
+- ✅ Serious Accidents Punishment Act family: Act + Enforcement Decree
+- ✅ Occupational Safety and Health Act family: Act + Enforcement Decree + Enforcement Rule (ADR-019; API discovery pending)
+- ✅ Effective-as-of `2026-05-06` is the default retrieval/eval slice; head/future rows are explicit-mode only
 - 🔶 Selected Criminal Code articles referenced by the official commentary (DA #5)
 - 🔶 Ministry of Employment notices on serious accidents (if applicable)
-- ✅ Enforcement Decree appendices (sub-element of statutes)
+- ✅ Annexes are retained as statute sub-elements; forms are now live for OSH 시행규칙 but remain persistence-only
 
 Judicial:
 - 🔶 Only what the API returns (number to be measured)
@@ -99,7 +100,6 @@ Academic:
 - 🔶 1–3 PDFs supplied manually by owner (converted to text first)
 
 **Excluded (deferred to Phase 2+)**:
-- Occupational Safety and Health Act (high relevance but expands scope)
 - Administrative regulations and rulings (Phase 3+)
 - Legislative materials (proposal rationale, minutes, review reports — all deferred)
 - Prosecution investigation guidelines (access uncertain)
@@ -148,7 +148,7 @@ On the question "does a search engine's chunking and embedding count as data mod
 2. **Database**: PostgreSQL + pgvector (fits Phase 1 scale, < 5M vectors)
 3. **BM25**: bm25s library
 4. **Embedding**: KURE or bge-m3 (Korean retrieval-tuned)
-5. **Reranker**: bge-reranker-v2-m3 (Phase 3+)
+5. **Reranker**: bge-reranker-v2-m3 (Phase 1 hybrid baseline per ADR-019)
 6. **Choice**: no LangChain or LlamaIndex — direct implementation (learning and portfolio value)
 
 ### Retrieval pipeline (Layer 5, Phase 2–4) 🔶
@@ -248,9 +248,9 @@ chunks (
 
 ### Phase roadmap 🔶
 
-- **Phase 1 (Walking Skeleton)**: single law + enforcement decree + commentary, BM25 only, no Query Rewriting
-- **Phase 2**: add Query Rewriting, Vector + RRF
-- **Phase 3**: add Reranker, formalize evaluation set
+- **Phase 1 (SAPA + OSH statutory baseline)**: SAPA + OSH full statutory families, effective-as-of default, BM25 + vector + RRF + reranker, compare `bge-m3` and KURE before freezing embeddings
+- **Phase 2**: broaden source categories after the statutory baseline is measured
+- **Phase 3**: add Query Rewriting once baseline retrieval and evaluation exist
 - **Phase 4**: add cross-reference graph, activate temporality
 
 ---
@@ -267,7 +267,7 @@ To be resolved in the next session:
 
 ❓ **D-4**: Whether law.go.kr OpenAPI actually exposes terminology-mapping endpoints, or whether the MCP server built that data separately — needs measurement
 
-✅ **D-5: RESOLVED** — Document Parsing Pipeline (and other downstream layers) begin immediately after the Phase-1 statute DDL freeze (ADR-010). Walking-skeleton goal: 중대재해처벌법 end-to-end before generalizing. ERDs for other categories (judicial / interpretive / practical / academic) ship as parallel work, not as Phase-1 blockers.
+✅ **D-5: RESOLVED** — Document Parsing Pipeline (and other downstream layers) begin immediately after the Phase-1 statute DDL freeze (ADR-010). ADR-019 replaces the old single-statute walking skeleton with the SAPA + OSH full-family statutory baseline. ERDs for other categories (judicial / interpretive / practical / academic) ship as parallel work, not as Phase-1 blockers.
 
 ❓ **D-6**: Whether KLRI materials are included in Phase 1 body indexing (acceptance of the Type 4 gray area)
 
@@ -487,18 +487,19 @@ The shared structure of these six slips:
 
 ## 10. Next Session Starting Guide
 
-**Phase-1 statute ERD is frozen** as `migrations/001_statute_tables.sql` (ADR-010, 2026-04-29), with ADR-013 amending the temporality flag from `is_current` to `is_head` and ADR-014 adding parallel `annex_attachments` / `form_attachments` while deferring `attachment_blobs`. ADR-015 sets post-freeze migration management as ordered raw SQL files plus a `schema_migrations` ledger. ADR-016 stores downloaded annex binaries under `data/annexes/`; ADR-017 makes PDF the default retained format with HWP fallback; ADR-018 defines annex content de-layout normalization. Accepted decision context for the Phase-1 statute schema + ingestion lives in `docs/decisions/ADR-001` through `ADR-018`. The current phase is **ingestion-pipeline implementation**. `legal_documents`, `structure_nodes`, and `annexes` now load end-to-end for the Phase-1 Act + Decree corpus; the running Compose `database` service is filled with 2 documents, 240 normalized `structure_nodes`, 5 `annexes`, and 21 `annex_attachments`. Five PDF attachment rows are locally retained; HWP/image rows remain provenance-only.
+**Phase-1 statute ERD is frozen** as `migrations/001_statute_tables.sql` (ADR-010, 2026-04-29), with ADR-013 amending the temporality flag from `is_current` to `is_head` and ADR-014 adding parallel `annex_attachments` / `form_attachments` while deferring `attachment_blobs`. ADR-015 sets post-freeze migration management as ordered raw SQL files plus a `schema_migrations` ledger. ADR-016 stores downloaded annex binaries under `data/annexes/`; ADR-017 makes PDF the default retained format with HWP fallback; ADR-018 defines annex content de-layout normalization. ADR-019 expands Phase 1 from SAPA-only to SAPA + OSH full statutory families and pulls the first hybrid retrieval baseline into Phase 1. Accepted decision context for the Phase-1 statute schema, ingestion, and scope lives in `docs/decisions/ADR-001` through `ADR-019`. The current phase is **OSH API discovery before code changes**. SAPA `legal_documents`, `structure_nodes`, and `annexes` load end-to-end; the running Compose `database` service is filled with 2 SAPA documents, 240 normalized `structure_nodes`, 5 `annexes`, and 21 `annex_attachments`. Five PDF attachment rows are locally retained; HWP/image rows remain provenance-only. OSH has not been fetched or ingested yet.
 
 **Do immediately on next session**:
 
 1. Read `CLAUDE.md` (entry point) and the latest `docs/sessions/*.md`.
 2. Confirm scope with owner before generating output.
-3. **Recommended next action: implement `supplementary_provisions` ingestion.** Persist 부칙 rows because the table exists and is SQL-queryable, but keep them out of chunks per ADR-005. Do not parse inner 제N조 structure until a separate decision or retrieval need appears.
-4. **Decide the ADR-018 production boundary scorer.** Current annex de-layouting uses a reviewed deterministic Phase-1 substitute; choose the Korean tokenizer / morphological analyzer before broadening the scorer.
-5. **Forms ingestion remains future work.** `form_attachments` schema exists for ADR-014 symmetry, but the Phase-1 corpus still has 0 form rows.
-6. **ADR-006 verification trigger** still pending — fires on first ingestion of any 시행규칙-bearing statute (must verify `<법종구분>` is exactly `'총리령'` or `'부령'`, not a ministry-prefixed variant).
-7. **Heading generalization is open outside Phase-1 corpus.** The 2026-05-04 Docker smoke against all local `data/raw` showed `형법` duplicates `조문키='0001000'` for multiple `전문` heading rows. The current parser's `전문 → level 2` mapping is valid for 중대재해처벌법 Act/Decree but not yet a general statute-heading parser.
-8. Open ERD TODOs (TODO-2, TODO-5, TODO-7) ship as additive Phase-2 migrations; none blocks ingestion-pipeline work.
+3. **Recommended next action: run ADR-019 OSH API discovery.** Use law.go.kr `lawSearch.do` / `lawService.do` with `target=law` and `target=eflaw` for OSH Act, 시행령, and 시행규칙. Record exact returned `law_id`, `mst`, title, `doc_type`, effective date, and head/effective-slice interpretation.
+4. **Raw-retention identity check is mandatory.** If `target=eflaw` returns distinct XML for the same `(law_id, mst)` at different `efYd` values, stop and draft a raw-retention identity ADR before writing source rows.
+5. **Then complete source-ingestion gaps for OSH.** ADR-013 new-MST supersession behavior, persistence-only `supplementary_provisions`, and persistence-only `forms` / `form_attachments` are now active blockers because OSH has 시행규칙 and forms.
+6. **Decide the ADR-018 production boundary scorer.** Current annex de-layouting uses a reviewed deterministic Phase-1 substitute; choose the Korean tokenizer / morphological analyzer before broadening the scorer.
+7. **ADR-006 verification trigger** fires on OSH 시행규칙 ingestion — verify `<법종구분>` is exactly `'총리령'` or `'부령'`, not a ministry-prefixed variant.
+8. **Heading generalization is open outside the SAPA corpus.** The 2026-05-04 Docker smoke against all local `data/raw` showed `형법` duplicates `조문키='0001000'` for multiple `전문` heading rows. Verify OSH heading shapes from API samples before changing the parser.
+9. Open ERD TODOs (TODO-2, TODO-5, TODO-7) ship as additive Phase-2 migrations; none blocks ADR-019 OSH discovery.
 
 **Closed dependencies** (no longer on the implement-list):
 - ADR-008 raw-API-XML retention dependency — closed by ADR-011 on 2026-05-01.
@@ -510,6 +511,7 @@ The shared structure of these six slips:
 - ADR-016 annex binary retention — accepted and landed on 2026-05-05. `scripts/download_annex_attachments.py` downloads HWP/PDF/image files to `data/annexes/{law_id}/{mst}/{annex_key}/{filename}`, uses OC only as request credential, stores repo-relative paths/checksums/fetch timestamps, and discovers image URLs through verified rendered law.go.kr annex content with strict rendered-order matching.
 - ADR-013 rename migration — landed on 2026-05-06. `003_is_head_rename.sql` renames temporal source-table flags from `is_current` to `is_head`; populate now uses `is_head` for Act parent lookup and child inserts.
 - Running dev DB fill — current counts after 2026-05-06 rename verification: 2 `legal_documents`, 240 `structure_nodes`, 232 non-root `structure_nodes` with `parent_id`, 5 `annexes`, 21 `annex_attachments`; 5 PDF rows stored/checksummed/fetched, HWP/image rows provenance-only.
+- ADR-019 Phase-1 OSH scope expansion — accepted on 2026-05-06. Phase 1 now targets SAPA + OSH full statutory families, with current-law retrieval/eval defaulting to the legally effective slice as of 2026-05-06 and hybrid retrieval as the first baseline.
 
 **Phase-2 follow-up parking lot** (separate ADRs at the boundary):
 - Drop `sort_key` column per ADR-012 §Consequences — redundant with tagless `node_key` under the accepted encoding.
@@ -583,3 +585,4 @@ The shared structure of these six slips:
 - v1.8 (2026-05-05): ADR-017 accepted PDF-default retention with HWP fallback. Downloader default now selects PDF first and falls back to HWP only when PDF retention is unavailable or invalid; explicit `--types` still supports exact operator-selected retention. Local dev cleanup preserved all attachment provenance rows and retained only 5 PDF binaries.
 - v1.9 (2026-05-05): ADR-018 accepted annex content de-layout normalization. `annexes.content_text` is parser-owned semantic text for retrieval while raw XML/PDF remain fidelity sources. Phase-1 annex hard-wrap repairs landed with parser tests and a refresh script for existing DB rows.
 - v1.10 (2026-05-06): ADR-013 executable rename landed through `migrations/003_is_head_rename.sql`. `legal_documents`, `structure_nodes`, `annexes`, and `forms` now expose `is_head`; the head Act title index was renamed; populate uses `is_head` for Act parent lookup and source-row inserts. §10 now points to persistence-only `supplementary_provisions` ingestion or ADR-018 tokenizer selection.
+- v1.11 (2026-05-06): ADR-019 accepted Phase-1 scope expansion from SAPA-only to SAPA + OSH full statutory families. §1, §3, §5, §6, and §10 now reflect OSH API discovery as the next step, effective-as-of `2026-05-06` as the default retrieval/eval slice, persistence-only `supplementary_provisions` / `forms`, and hybrid retrieval as the first baseline.

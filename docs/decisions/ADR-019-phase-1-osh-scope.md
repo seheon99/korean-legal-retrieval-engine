@@ -1,6 +1,6 @@
 # ADR-019 — Phase 1 scope expansion: add 산업안전보건법 full family
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-05-06
 - **Context layer**: Phase-1 scope, statute ingestion, retrieval baseline
 - **Amends**:
