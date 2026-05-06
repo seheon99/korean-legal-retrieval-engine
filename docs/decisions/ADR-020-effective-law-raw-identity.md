@@ -113,10 +113,10 @@ for retained statute XML.
 Do **not** retain `target=law` responses as parallel canonical raw
 documents when `eflaw` rows are available.
 
-The canonical retained XML identity is:
+The canonical retained XML identity for `eflaw` rows is:
 
 ```text
-(law_id, mst, efYd)
+(target=eflaw, law_id, mst, efYd)
 ```
 
 The canonical ingested document identity is:
@@ -124,6 +124,10 @@ The canonical ingested document identity is:
 ```text
 (law_id, mst, effective_date)
 ```
+
+`target` is fixed to `eflaw` for canonical Phase-1 statute XML, so it does
+not participate in the `legal_documents` uniqueness rule. It remains part
+of raw-source provenance and must be recorded in `source_url`.
 
 `mst` remains an upstream promulgation-version identifier, but it is not
 alone sufficient for local source-row identity when staged enforcement
