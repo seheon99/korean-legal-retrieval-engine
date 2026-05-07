@@ -217,18 +217,20 @@ def parse_structure_nodes(doc: Document) -> list[StructureNode]:
         article_kind = _required_text(unit, "조문여부", doc.xml_path)
         level = 2 if article_kind == "전문" else 5
         parent_node_key = _nearest_parent_key(stack, level)
+        article_number = _normalize_article_number(unit, doc.xml_path)
+        article_content = _required_structure_content(unit, "조문내용", doc.xml_path)
         node = StructureNode(
             parent_node_key=parent_node_key,
             level=level,
             node_key=article_key,
-            number=_normalize_article_number(unit, doc.xml_path),
+            number=article_number,
             title=_text(unit, "조문제목"),
-            content=_required_text(unit, "조문내용", doc.xml_path),
+            content=article_content,
             sort_key=article_key,
             effective_date=_date_text(unit, "조문시행일자", doc.xml_path),
             is_changed=_changed_flag(_text(unit, "조문변경여부"), doc.xml_path),
             source_url=None,
-            content_hash=sha256_text(_required_text(unit, "조문내용", doc.xml_path)),
+            content_hash=sha256_text(article_content),
         )
         _append_node(nodes, seen_keys, node, doc.xml_path)
         _push_stack(stack, level, article_key)
@@ -256,7 +258,7 @@ def parse_structure_nodes(doc: Document) -> list[StructureNode]:
             else:
                 explicit_para_index += 1
                 para_segment = f"{explicit_para_index:02d}"
-                para_content = _required_text(para, "항내용", doc.xml_path)
+                para_content = _required_structure_content(para, "항내용", doc.xml_path)
 
             para_key, para_sort = _compose_para_key(article_key, para_segment)
             para_node = StructureNode(
@@ -281,14 +283,15 @@ def parse_structure_nodes(doc: Document) -> list[StructureNode]:
                     item_number, item_branch_number, doc.xml_path
                 )
                 item_key, item_sort = _compose_item_key(para_key, para_sort, item_segment)
-                item_content = _required_text(item, "호내용", doc.xml_path)
+                item_number_normalized = _normalize_item_number(
+                    item_number, item_branch_number, doc.xml_path
+                )
+                item_content = _required_structure_content(item, "호내용", doc.xml_path)
                 item_node = StructureNode(
                     parent_node_key=para_key,
                     level=7,
                     node_key=item_key,
-                    number=_normalize_item_number(
-                        item_number, item_branch_number, doc.xml_path
-                    ),
+                    number=item_number_normalized,
                     title=None,
                     content=item_content,
                     sort_key=item_sort,
@@ -303,14 +306,17 @@ def parse_structure_nodes(doc: Document) -> list[StructureNode]:
                     subitem_key, subitem_sort = _compose_subitem_key(
                         item_key, item_sort, index
                     )
-                    subitem_content = _required_text(subitem, "목내용", doc.xml_path)
+                    subitem_number = _strip_trailing_dot(
+                        _required_text(subitem, "목번호", doc.xml_path)
+                    )
+                    subitem_content = _required_structure_content(
+                        subitem, "목내용", doc.xml_path
+                    )
                     subitem_node = StructureNode(
                         parent_node_key=item_key,
                         level=8,
                         node_key=subitem_key,
-                        number=_strip_trailing_dot(
-                            _required_text(subitem, "목번호", doc.xml_path)
-                        ),
+                        number=subitem_number,
                         title=None,
                         content=subitem_content,
                         sort_key=subitem_sort,
@@ -562,6 +568,30 @@ def _required_normalized_text(parent: ET.Element, tag: str, xml_path: Path) -> s
 
 def _normalized_element_text(el: ET.Element) -> str | None:
     value = "".join(el.itertext()).replace("\r\n", "\n").replace("\r", "\n").strip()
+    return value if value else None
+
+
+def _required_structure_content(
+    parent: ET.Element,
+    tag: str,
+    xml_path: Path,
+) -> str:
+    el = parent.find(tag)
+    if el is None:
+        raise ValueError(f"{xml_path}: required <{tag}> missing")
+    value = _normalized_structure_content_text(el)
+    if value is None:
+        raise ValueError(f"{xml_path}: required <{tag}> empty after normalization")
+    return value
+
+
+def _normalized_structure_content_text(el: ET.Element) -> str | None:
+    raw = "".join(el.itertext()).replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.strip() for line in raw.split("\n") if line.strip()]
+    if not lines:
+        return None
+
+    value = "\n".join(lines).strip()
     return value if value else None
 
 

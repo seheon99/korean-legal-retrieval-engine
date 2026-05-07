@@ -222,12 +222,12 @@ Represents a single node in the statute's hierarchical body. Self-referencing tr
 | `node_key` | ✅ Resolved (TODO-4 levels 1–5; ADR-012 levels 6–8) | Levels 1–5: `<조문단위 조문키="0004001">` API-native; encodes 조문가지번호 directly (e.g., `0104021` for 제104조의2). Levels 6–8: tagless positional segments appended — `{조문키}-{HH}-{NN}{BB}-{KK}`. Ordinal at 항/목; parsed `<호번호>`+`<호가지번호>` at 호. **Composite `UNIQUE (doc_id, node_key)`**. |
 | `number` | ✅ Sketch + XML | Article number as text. From `<조문번호>`, `<항번호>`, `<호번호>`, `<목번호>` depending on level |
 | `title` | ✅ XML | `<조문제목>`. Only present on articles (level 5). e.g., "목적", "정의", "적용범위" |
-| `content` | ✅ Sketch ("text") | Renamed from sketch's `text` to avoid SQL keyword collision. Contains `<조문내용>`, `<항내용>`, `<호내용>`, or `<목내용>` |
+| `content` | ✅ Sketch ("text") | Renamed from sketch's `text` to avoid SQL keyword collision. Parser-owned semantic text from `<조문내용>`, `<항내용>`, `<호내용>`, or `<목내용>`: line endings normalized and empty layout lines removed. Legal unit prefixes such as `제56조(…)`, `①`, `3의2.`, or `가.` are preserved because `content` is the standalone legal text surface for chunking and evidence display. Implicit 항 rows still use `content = ''` per ADR-012. |
 | `sort_key` | ✅ Resolved (ADR-012) | Tagless dot-separated extension of 조문키: `{조문키}.{HH}.{NN}{BB}.{KK}`. Equivalent to `node_key` modulo separator (`-` ↔ `.`). Phase-2 follow-up: drop column per ADR-012 §Consequences. |
 | `effective_date` | ✅ XML | `<조문시행일자>`. Per-article effective date — can differ from the document-level date for amended articles |
 | `is_changed` | ⚠️ XML | `<조문변경여부>`. Whether this article was modified in this version. Useful for amendment tracking |
 | `source_url` | 🔶 Consistent | Nullable. For nodes that have a direct API link |
-| `content_hash` | 🔶 Design principle #9 | For idempotent indexing at node level |
+| `content_hash` | 🔶 Design principle #9 | SHA-256 of the stored normalized `content` UTF-8 bytes. For idempotent indexing at node level |
 | `effective_at`, `superseded_at`, `is_head` | ✅ Resolved (ADR-013) | Same temporality/head-version pattern as legal_documents. Legal effectiveness is computed from timestamps, not `is_head` |
 | `created_at`, `updated_at` | ✅ Auto-apply | Standard audit fields |
 

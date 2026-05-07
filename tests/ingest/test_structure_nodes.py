@@ -45,11 +45,16 @@ def test_parse_phase_1_act_structure_nodes() -> None:
     assert nodes[0].content == "제1장 총칙"
 
     by_key = {node.node_key: node for node in nodes}
+    assert by_key["0001001"].content.startswith("제1조(목적) 이 법은 사업 또는 사업장")
+    assert by_key["0002001"].content == "제2조(정의) 이 법에서 사용하는 용어의 뜻은 다음과 같다."
     assert by_key["0002001-00"].level == 6
     assert by_key["0002001-00"].number == ""
     assert by_key["0002001-00"].content == ""
     assert by_key["0002001-00-0200"].number == "2"
+    assert by_key["0002001-00-0200"].content.startswith('2.  "중대산업재해"란')
     assert by_key["0002001-00-0200-01"].number == "가"
+    assert by_key["0016001-03"].content.endswith("[시행일 : 2021.1.26] 제16조")
+    assert "\n\n" not in by_key["0016001-03"].content
 
     _assert_unique_node_keys(nodes)
     _assert_parent_keys_resolve(nodes)
@@ -60,6 +65,7 @@ def test_parse_phase_1_decree_structure_nodes() -> None:
 
     assert len(nodes) == 138
     by_key = {node.node_key: node for node in nodes}
+    assert by_key["0003001"].content.startswith("제3조(공중이용시설) 법 제2조제4호 각 목")
     assert by_key["0003001-00"].level == 6
     assert by_key["0003001-00-0200-01"].content.startswith("가.")
     assert by_key["0003001-00-0400"].number == "4"
@@ -76,6 +82,8 @@ def test_parse_osh_act_inline_branched_items() -> None:
 
     assert by_key["0049001-01-0302"].number == "3의2"
     assert by_key["0049001-01-0302"].content.startswith("3의2.")
+    assert by_key["0056001"].content == "제56조(중대재해등의 원인조사 등)"
+    assert by_key["0056001-01"].content.startswith("① 고용노동부장관은")
 
     _assert_unique_node_keys(nodes)
     _assert_parent_keys_resolve(nodes)
