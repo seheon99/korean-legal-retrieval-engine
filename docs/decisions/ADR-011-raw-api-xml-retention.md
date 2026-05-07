@@ -28,7 +28,7 @@
   4. Multi-machine replication / cross-region durability. Phase-1
      runs on a single Fedora server; DR posture is "re-fetch from
      API" plus filesystem-level snapshots. Phase-3 concern.
-  5. Whether `docs/api-samples/` is renamed/repointed. ADR-011
+  5. Whether `data/api-samples/` is renamed/repointed. ADR-011
      defines `data/raw/` as the retention path; the relationship
      to the existing samples directory is a documentation/tooling
      decision, not a retention decision.
@@ -60,7 +60,7 @@ The decision matters because:
 
 ## Empirical basis (verified 2026-05-01 against existing samples)
 
-Files under `docs/api-samples/`:
+Files under `data/api-samples/`:
 
 | File                                           | Size    |
 | ---------------------------------------------- | ------- |
@@ -107,7 +107,7 @@ Concrete commitments:
 3. **Lifecycle**: indefinite retention. New MST → new file. Old MSTs
    are kept. No rotation. No time-based pruning.
 4. **gitignore**: `data/raw/` is added to `.gitignore` (matching the
-   existing `docs/api-samples/` convention — operational data, not
+   existing `data/api-samples/` convention — operational data, not
    source).
 5. **Integrity invariant**: `legal_documents.content_hash` is the
    SHA-256 of the corresponding `data/raw/{law_id}/{mst}.xml`
@@ -297,10 +297,9 @@ some SLA).
   becomes a load-bearing assumption. Documented; mitigated by the
   re-fetch fallback.
 - **Inspection paths in ADRs and docs use `data/raw/` going
-  forward.** Existing references to `docs/api-samples/` remain
-  valid (the directory continues to exist for ad-hoc curl
-  experiments) but new tooling and ingestion writes target
-  `data/raw/`.
+  forward.** `data/api-samples/` remains available for ad-hoc
+  `lawSearch.do` samples, but it is not the canonical retention store.
+  New tooling and ingestion writes target `data/raw/`.
 
 ## Consequences
 
@@ -317,8 +316,8 @@ some SLA).
 - `CLAUDE.md` §4 mentions retention path and policy in the same
   paragraph that lists ADR-008.
 - The fetch script (Thread 2 of today's plan) writes to
-  `data/raw/{law_id}/{mst}.xml`, not to `docs/api-samples/`.
-  `docs/api-samples/` keeps existing files but is not the canonical
+  `data/raw/{law_id}/{mst}.xml`, not to `data/api-samples/`.
+  `data/api-samples/` keeps existing files but is not the canonical
   store.
 - The next-session ingestion pipeline writes to `data/raw/` after a
   successful fetch+parse, computes `content_hash`, and stores it on
@@ -364,7 +363,7 @@ ADR-011 is revisited if any of the following hold:
   version-specific natural key (filename component)
 - `docs/decisions/ADR-010-phase-1-ddl-freeze.md` — `content_hash`
   required column on `legal_documents` (integrity invariant link)
-- `docs/api-samples/law-228817-중대재해처벌법.xml`,
+- `data/api-samples/law-228817-중대재해처벌법.xml`,
   `law-277417-중대재해처벌법시행령.xml` — existing samples;
   empirical-basis source for size estimates
 - `CLAUDE.md` §4 — current-phase ingestion-pipeline / query-layer

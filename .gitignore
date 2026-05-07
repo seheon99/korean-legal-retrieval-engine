@@ -1,6 +1,6 @@
 # Local-only law.go.kr API responses (contain OC key in echoed URLs).
 # See README.md for re-creation instructions.
-docs/api-samples/
+data/api-samples/
 
 # Raw-API-XML retention store per ADR-011.
 # Canonical fallback for un-promoted fields per ADR-008's forward policy.

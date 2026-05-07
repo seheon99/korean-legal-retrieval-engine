@@ -176,8 +176,9 @@ korean-legal-retrieval-engine/
 │   ├── design-principles.md        ← 13 durable design principles
 │   ├── legal-erd.md                ← ERD reference (superseded for statute scope by ADRs 001–020)
 │   ├── decisions/                  ← ADR-NNN-<slug>.md (one per decision)
-│   ├── sessions/                   ← YYYY-MM-DD.md per work session
-│   └── api-samples/                ← raw 법제처 API responses
+│   └── sessions/                   ← YYYY-MM-DD.md per work session
+├── data/
+│   └── api-samples/                ← local-only raw 법제처 API responses
 ├── src/
 ├── migrations/                     ← raw SQL versioned from day 1
 ├── scripts/                        ← fetchers, one-off utilities

@@ -41,7 +41,7 @@ Two local-only directories hold 법제처 API responses, both gitignored:
   for effective-date-specific statute XML (`lawService.do?target=eflaw`)
   per [ADR-020](docs/decisions/ADR-020-effective-law-raw-identity.md).
   Indefinite retention; integrity link via `legal_documents.content_hash`.
-- `docs/api-samples/` — developer-facing samples for ADR drafting and
+- `data/api-samples/` — developer-facing samples for ADR drafting and
   ad-hoc inspection. Search responses (`lawSearch.do`) write here.
 
 Responses contain the OC parameter echoed inside `법령상세링크` URLs,
@@ -70,8 +70,8 @@ Path conventions:
 
 - Documents: `data/raw/eflaw/{law_id}/{mst}/{efYd}.xml` (e.g.
   `data/raw/eflaw/013993/228817/20220127.xml` for the Act).
-- Searches: `docs/api-samples/search-{query}.xml` (e.g.
-  `docs/api-samples/search-중대재해.xml`).
+- Searches: `data/api-samples/search-{query}.xml` (e.g.
+  `data/api-samples/search-중대재해.xml`).
 
 ## Repository layout
 
@@ -83,11 +83,11 @@ legal-retrieval/
 │   ├── legal-erd-draft.md   ← current ERD work
 │   ├── phase-1-progress.md  ← Phase 0 synthesis
 │   ├── decisions/           ← ADR-NNN-<slug>.md
-│   ├── sessions/            ← YYYY-MM-DD.md
-│   └── api-samples/         ← local-only (gitignored)
+│   └── sessions/            ← YYYY-MM-DD.md
 ├── migrations/              ← DDL versioned from day 1 (001_statute_tables.sql per ADR-010)
 ├── data/
-│   └── raw/                 ← retention store per ADR-011 (gitignored)
+│   ├── raw/                 ← retention store per ADR-011 (gitignored)
+│   └── api-samples/         ← local-only API samples (gitignored)
 ├── src/                     ← Python source
 ├── scripts/                 ← fetchers, one-off utilities
 │   └── fetch_law_samples.sh ← API fetch utility

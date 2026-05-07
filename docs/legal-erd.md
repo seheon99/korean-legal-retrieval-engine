@@ -344,7 +344,7 @@ search in Phase 1.
 on `lawSearch.do` returns exactly two records — Act (MST=228817) and
 시행령 (MST=277417). No 시행규칙 row exists in the API result set.
 The Decree carries 5 별표 (annexes) and 0 서식 (forms) — see
-`docs/api-samples/search-중대재해.xml` and `law-277417-…xml`.
+`data/api-samples/search-중대재해.xml` and `law-277417-…xml`.
 
 **Why no ADR**: this is a documentation cleanup, not a real decision.
 The choice was forced by empirical reality (no 시행규칙 exists for
@@ -488,7 +488,7 @@ amendment-tracking fields, derivable). Not the unknown-evolving-
 metadata shape that justifies a JSONB column.
 
 **Soft dependency**: the policy presumes raw API XML responses remain
-replay-available (currently `docs/api-samples/` holds samples; no
+replay-available (currently `data/api-samples/` holds samples; no
 formal pipeline-level retention commitment yet). ADR-008 flags this
 as a revisit trigger.
 

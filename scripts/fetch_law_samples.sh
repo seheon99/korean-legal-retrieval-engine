@@ -7,10 +7,10 @@
 #   lawService.do target=eflaw -> data/raw/eflaw/{law_id}/{mst}/{efYd}.xml
 #       Canonical retention store per ADR-020. Gitignored, indefinite
 #       retention, plain UTF-8, byte-for-byte from the API.
-#   lawSearch.do  (search index)  -> docs/api-samples/search-{query}.xml
+#   lawSearch.do  (search index)  -> data/api-samples/search-{query}.xml
 #       Developer-facing samples; not retention. ADR-011 "Out of scope" #2.
 #
-# Requires LAW_GO_KR_OC in environment (see README §"docs/api-samples/").
+# Requires LAW_GO_KR_OC in environment (see README §"data/api-samples/").
 # Idempotent: existing files are skipped unless --force is set.
 # Atomic: writes via tmp+rename so a crash mid-fetch leaves no half-files.
 
@@ -31,7 +31,7 @@ PHASE1_SEARCHES=(
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RAW_DIR="$REPO_ROOT/data/raw"
-SAMPLES_DIR="$REPO_ROOT/docs/api-samples"
+SAMPLES_DIR="$REPO_ROOT/data/api-samples"
 
 FORCE=0
 
@@ -49,7 +49,7 @@ Fetch raw XML responses from 법제처 OpenAPI.
 
 Document fetches (lawService.do target=eflaw) write to
 data/raw/eflaw/{law_id}/{mst}/{efYd}.xml per ADR-020. Search fetches write
-to docs/api-samples/search-{query}.xml. Requires LAW_GO_KR_OC in
+to data/api-samples/search-{query}.xml. Requires LAW_GO_KR_OC in
 environment. Idempotent unless --force.
 USAGE
 }
