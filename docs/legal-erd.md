@@ -1,4 +1,4 @@
-# Statute (성문규범) ERD Draft
+# Statute (성문규범) ERD
 
 > **Status**: Frozen — see `migrations/001_statute_tables.sql` per ADR-010 (Accepted 2026-04-29). Future schema changes ship as additive migrations (`002_*.sql`, ...).
 > **Amendments**: ADR-013 replaces `is_current` with `is_head`. ADR-014 adds parallel `annex_attachments` / `form_attachments` tables, moves binary references out of `annexes` / `forms`, and defers `attachment_blobs`.
